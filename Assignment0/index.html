@@ -1,0 +1,63 @@
+<!-- 这是一个文档类型声明，告诉浏览器这是一个 HTML 文件。 -->
+<!DOCTYPE html>
+<!-- 这是一个 HTML 文档的根元素。-->
+<html>
+<!-- 这是一个 HTML 文档的头部，包含了一些元数据和样式信息。-->
+<head>
+    <!-- 这是一个 CSS 样式表，用于设置 HTML 文档的样式。这两个 CSS 选择器用于设置 HTML 文档的根元素的样式。html选择器用于设置整个 HTML文档的样式,而 body选择器用于设置 HTML 文档的主体部分的样式。 -->
+    <style>
+        html,
+        body {
+            margin: 0;
+            background-color: rgb(175, 175, 175);
+            height: 100%;
+            width: 100%;
+            /* 这一个 CSS 属性用于隐藏 HTML 文档的滚动条。 */
+            overflow: hidden;
+        }
+        /* 这一个 CSS 选择器，用于选择一个名为 glcanvas的 Canvas 元素。Canvas 元素是一个 HTML 元素，用于在网页上绘制图形。这个 CSS 属性用于设置 Canvas 元素的位置。 */
+        #glcanvas {
+            top: 0;
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+    <!-- 这一个 HTML 标签，用于加载外部资源，例如 CSS 样式表、图像等。 rel="preload"：这一个 HTML 属性，用于告诉浏览器在加载页面时预加载指定的资源。as="image"：这一个 HTML 属性，用于指定要加载的资源。crossorigin：这一个 HTML 属性，用于指定是否允许跨域请求。-->
+    <!-- crossorigin是一个枚举属性，用于指定如何处理跨域请求。它有三个值：anonymous、use-credentials、空字符串。anonymous：这一个值，用于指定不发送凭据（例如 cookie 或者 HTTP 认证信息）到服务器。use-credentials：这一个值，用于指定发送凭据（例如 cookie 或者 HTTP 认证信息）到服务器。空字符串：这一个值，用于指定不发送凭据（例如 cookie 或者 HTTP 认证信息）到服务器，但是如果服务器要求发送凭据，则会发送凭据。 -->
+    <link rel="preload" href="/assets/mary/MC003_Kozakura_Mari.png" as="image" type="image/png" crossorigin/>
+    <!-- 这一个 HTML 标签，用于加载 JavaScript 脚本文件。src：这一个 HTML 属性，用于指定要加载的。defer：这一个 HTML 属性，用于告诉浏览器在加载页面时延迟执行指定的 JavaScript 脚本文件，以提高页面的加载速度和响应速度。 -->
+    <script src="lib/three.js" defer></script>
+    <script src="lib/OrbitControls.js" defer></script>
+    <!-- type="text/javascript"是一个 HTML 属性，用于指定要加载的 JavaScript 脚本文件的类型。 -->
+    <script type="text/javascript" src="lib/MTLLoader.js" defer></script>
+    <script type="text/javascript" src="lib/OBJLoader.js" defer></script>
+    <script type="text/javascript" src="lib/dat.gui.js" defer></script>
+    <!-- 当浏览器加载一个资源时，它会计算出一个哈希值，并将这个哈希值与integrity属性指定的哈希值进行比较。如果两个哈希值不匹配，浏览器会拒绝加载这个资源，从而保证加载的资源是安全的。 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gl-matrix/2.8.1/gl-matrix-min.js"
+        integrity="sha512-zhHQR0/H5SEBL3Wn6yYSaTTZej12z0hVZKOv3TwCUXT1z5qeqGcXJLLrbERYRScEDDpYIJhPC1fk31gqR783iQ=="
+        crossorigin="anonymous" defer> </script>
+
+    <script src="src/shaders/InternalShader.js" defer></script>
+    <script src="src/shaders/Shader.js" defer></script>
+    <script src="src/materials/Material.js" defer></script>
+    <script src="src/materials/PhongMaterial.js" defer></script>
+    <script src="src/textures/Texture.js" defer></script>
+
+    <script src="src/objects/Mesh.js" defer></script>
+    <script src="src/loads/loadOBJ.js" defer></script>
+    <script src="src/loads/loadShader.js" defer></script>
+
+    <script src="src/lights/Light.js" defer></script>
+    <script src="src/lights/PointLight.js" defer></script>
+
+    <script src="src/renderers/WebGLRenderer.js" defer></script>
+    <script src="src/renderers/MeshRender.js" defer></script>
+    <script src="src/engine.js" defer></script>
+</head>
+
+<body>
+    <canvas id="glcanvas"></canvas>
+
+</body>
+
+</html>
