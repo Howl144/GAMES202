@@ -1,12 +1,10 @@
 #ifdef GL_ES
 precision mediump float;
 #endif
-
 uniform vec3 uLightPos;
-uniform vec3 uCameraPos;
+uniform float uLightFarPlane;
 
-varying highp vec3 vNormal;
-varying highp vec2 vTextureCoord;
+varying highp vec3 worldPos;
 
 //深度值float -> 颜色值RGBA ，只能存储0-1之间的float值
 vec4 pack (float depth) {
@@ -20,7 +18,9 @@ vec4 pack (float depth) {
 }
 
 void main(){
-
-  //gl_FragColor = vec4( 1.0, 0.0, 0.0, gl_FragCoord.z);
-  gl_FragColor = pack(gl_FragCoord.z);
+  float lightDistance = length(worldPos - uLightPos);
+  float fragDepth = lightDistance / uLightFarPlane;
+  gl_FragColor = pack(fragDepth);
+  //正交投影直接赋值
+  // gl_FragColor = pack(gl_FragCoord.z);
 }

@@ -16,7 +16,7 @@ function GAMES202Main() {
 		alert('Unable to initialize WebGL. Your browser or machine may not support it.');
 		return;
 	}
-
+	console.log('WebGL version: ' + gl.getParameter(gl.VERSION));
 	// Add camera
 	const camera = new THREE.PerspectiveCamera(75, gl.canvas.clientWidth / gl.canvas.clientHeight, 1e-2, 1000);
 	camera.position.set(cameraPosition[0], cameraPosition[1], cameraPosition[2]);
@@ -45,47 +45,42 @@ function GAMES202Main() {
 	
 	// Add lights
 	// light - is open shadow map == true
-	let lightPos1 = [0, 80, 80];
 	let focalPoint = [0, 0, 0];
 	let lightUp = [0, 1, 0]
 	//第一个光源的亮度
-	const directionLight = new DirectionalLight(2500, [1, 1, 1], lightPos1, focalPoint, lightUp, true, renderer.gl);
-	//Edit End
-	renderer.addLight(directionLight);
+	let lightPos1 = [0, 0, 40];
+	const pointLight = new PointLight(10, [1, 1, 1], lightPos1, focalPoint, lightUp, true, renderer.gl);
+	renderer.addLight(pointLight);
 	//添加第二个光源
-	let lightPos2 = [90, 90, 0];
-	const directionLight2 = new DirectionalLight(2500, [1, 1, 1], lightPos2, focalPoint, lightUp, true, renderer.gl);
-	renderer.addLight(directionLight2);
+	let lightPos2 = [0, 0, -40];
+	const pointLight2 = new PointLight(10, [1, 1, 1], lightPos2, focalPoint, lightUp, true, renderer.gl);
+	renderer.addLight(pointLight2);
+	//添加第三个光源
+	let lightPos3 = [40, 0, 0];
+	const pointLight3 = new PointLight(10, [1, 1, 1], lightPos3, focalPoint, lightUp, true, renderer.gl);
+	renderer.addLight(pointLight3);
+	//添加第四个光源
+	let lightPos4 = [-40, 0, 0];
+	const pointLight4 = new PointLight(10, [1, 1, 1], lightPos4, focalPoint, lightUp, true, renderer.gl);
+	renderer.addLight(pointLight4);
 
 
 	// Add shapes
-	//Edit Start 添加旋转参数
-	let floorTransform = setTransform(0, 0, -30, 0, 0, 0, 4, 4, 4);
-	let obj1Transform = setTransform(0, 0, 0, 0, 0, 0, 20, 20, 20);
-	let obj2Transform = setTransform(40, 0, -40, 0, 0, 0, 10, 10, 10);
+	//Edit Start 添加缩放参数
+	let floorTransform = setTransform(0, 0, 0, 0, 0, 0, 6, 6, 6);
+	let obj1Transform = setTransform(0, 0, 0, 0, 0, 0, 10, 10, 10);
 	//Edit End
 
 	loadOBJ(renderer, 'assets/mary/', 'Marry', 'PhongMaterial', obj1Transform);
-	loadOBJ(renderer, 'assets/mary/', 'Marry', 'PhongMaterial', obj2Transform);
 	loadOBJ(renderer, 'assets/floor/', 'floor', 'PhongMaterial', floorTransform);
-	
 
-	// let floorTransform = setTransform(0, 0, 0, 100, 100, 100);
-	// let cubeTransform = setTransform(0, 50, 0, 10, 50, 10);
-	// let sphereTransform = setTransform(30, 10, 0, 10, 10, 10);
-
-	//loadOBJ(renderer, 'assets/basic/', 'cube', 'PhongMaterial', cubeTransform);
-	// loadOBJ(renderer, 'assets/basic/', 'sphere', 'PhongMaterial', sphereTransform);
-	//loadOBJ(renderer, 'assets/basic/', 'plane', 'PhongMaterial', floorTransform);
-
-
-	function createGUI() {
-		const gui = new dat.gui.GUI();
-		// const panelModel = gui.addFolder('Model properties');
-		// panelModelTrans.add(GUIParams, 'x').name('X');
-		// panelModel.open();
-	}
-	createGUI();
+	// function createGUI() {
+	// 	const gui = new dat.gui.GUI();
+	// 	// const panelModel = gui.addFolder('Model properties');
+	// 	// panelModelTrans.add(GUIParams, 'x').name('X');
+	// 	// panelModel.open();
+	// }
+	// createGUI();
 
 	//Edit Start deltaTime实现
 	let prevTime = 0;

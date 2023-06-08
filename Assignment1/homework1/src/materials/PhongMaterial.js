@@ -13,6 +13,8 @@ class PhongMaterial extends Material {
             // Shadow
             'uShadowMap': { type: 'texture', value: light.fbo },
             'uLightMVP': { type: 'matrix4fv', value: lightMVP },
+            'uLightFarPlane': { type: '1f', value: light.lightFarPlane},
+            'uLightWorldSize': { type: '1f', value: light.mesh.lightSize},
         //Edit Start 添加lightIndex参数
         }, [], vertexShader, fragmentShader, null, lightIndex);
         //Edit End
