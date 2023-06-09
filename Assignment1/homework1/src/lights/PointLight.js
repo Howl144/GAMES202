@@ -11,7 +11,7 @@ class PointLight {
         this.focalPoint = focalPoint;
         this.lightUp = lightUp
         this.lightNearPlane = 0.01;
-        this.lightFarPlane = 400;//uniform需要
+        this.lightFarPlane = 1000;//uniform需要
         this.modelMatrix;//uniform需要
         this.hasShadowMap = hasShadowMap;
         this.fbo = new FBO(gl);

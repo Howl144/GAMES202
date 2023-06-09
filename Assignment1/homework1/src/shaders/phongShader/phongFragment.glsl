@@ -151,7 +151,7 @@ float PCF(sampler2D shadowMap, vec4 coords, float biasC, float filterRadiusUV) {
     // 应用随机旋转
     vec2 rotatedPoissonDisk = randomRotation(coords.xy, poissonDisk) * filterRadiusUV; 
     float shadowDepth = useShadowMap(shadowMap, coords + vec4(rotatedPoissonDisk, 0., 0.) , biasC, filterRadiusUV);
-    if(coords.z > shadowDepth + EPS){
+    if(coords.z > shadowDepth){
       //算的不可见的
       visibility++;
     }
@@ -167,8 +167,8 @@ float findBlocker(sampler2D shadowMap, vec4 coords, float zReceiver, float calib
   float blockDepth = 0.;
   // float shadowNearPlane = unpack(texture2D(shadowMap, coords.xy));
   //本来是用shadowNearPlane来计算searchRadius，但是这样会导致阴影边缘有锯齿，因为边缘处的shadowNearPlane和zReceiver的值几乎相同
-  //这里就跟正交投影的形式一样直接用投影矩阵的近平面来计算。2.0是因为光源传进的是半径
-  float searchRadius = calibratedLightSize * 2.0 * (zReceiver - 0.01) / zReceiver;
+  //这里就跟正交投影的形式一样直接用投影矩阵的近平面来计算。
+  float searchRadius = calibratedLightSize * (zReceiver - 0.01) / zReceiver;
 
   for(int i = 0; i < NUM_SAMPLES; i++){
     vec2 poissonDisk = staticPoissonDisk[i];
@@ -200,7 +200,7 @@ float PCSS(sampler2D shadowMap, vec4 coords, float biasC,float calibratedLightSi
 
   // STEP 2: penumbra size
   float penumbra = (zReceiver - avgBlockerDepth) * calibratedLightSize / avgBlockerDepth;
-  float filterRadiusUV = penumbra * 2.0;//2.0是因为光源传进的是半径
+  float filterRadiusUV = penumbra ;
 
   // STEP 3: filtering
   return PCF(shadowMap, coords, biasC, filterRadiusUV * TEXEL_SIZE);
@@ -229,11 +229,11 @@ vec3 blinnPhong() {
   vec3 phongColor = pow(radiance, vec3(1.0 / 2.2));
   return phongColor;
 }
-
+//gl_FragCoord.z
 float LinearizeDepth(float depth) 
 {
     float near = 0.01;
-    float far = 400.0;
+    float far = uLightFarPlane;
     float z = depth * 2.0 - 1.0; // back to NDC 
     return (2.0 * near * far) / (far + near - z * (far - near));    
 }
@@ -265,7 +265,7 @@ void main(void) {
   else{
     // 硬阴影无PCF，最后参数传0
     // visibility = useShadowMap(uShadowMap, vec4(shadowCoord.xy,fragDepth, 1.0), nonePCFBiasC, 0.0);
-    // visibility = PCF(uShadowMap, vec4(shadowCoord.xy,fragDepth, 1.0), pcfBiasC, calibratedLightSize);
+    // visibility = PCF(uShadowMap, vec4(shadowCoord.xy,fragDepth, 1.0), pcfBiasC, calibratedLightSize * TEXEL_SIZE);
     visibility = PCSS(uShadowMap, vec4(shadowCoord.xy,fragDepth, 1.0), pcfBiasC,calibratedLightSize);
   }
 
@@ -278,7 +278,7 @@ void main(void) {
 
   // //debug1
   // float debugDepth1 = length(vFragPos-uLightPos) / uLightFarPlane;
-
+  // gl_FragColor = vec4(vec3(debugDepth1), 1.0);
   // //debug2
   // float debugDepth2 = unpack(texture2D(uShadowMap, shadowCoord.xy));
   // gl_FragColor = vec4(vec3(debugDepth2), 1.0);
