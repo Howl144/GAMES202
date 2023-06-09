@@ -1,6 +1,6 @@
 class TRSTransform {
 	//Edit Start 添加rotate参数
-    constructor(translate = [0, 0, 0], rotate = [0, 0, 0], scale = [1, 1, 1]) {
+    constructor(translate = [0, 0, 0], rotate = [0, 0, 0], scale = [1.0, 1.0, 1.0]) {
         this.translate = translate;
 		this.rotate = rotate;
         this.scale = scale;
@@ -14,6 +14,7 @@ class Mesh {
 		this.hasVertices = false;
 		this.hasNormals = false;
 		this.hasTexcoords = false;
+		this.lightSize = transform.modelScaleX;
 
 		const modelTranslation = [transform.modelTransX, transform.modelTransY, transform.modelTransZ];
 		//Edit Start 添加旋转
@@ -88,7 +89,6 @@ class Mesh {
 			16, 17, 18, 16, 18, 19,   // right
 			20, 21, 22, 20, 22, 23,   // left
 		];
-
 		return new Mesh({ name: 'aVertexPosition', array: new Float32Array(positions) }, null, null, indices, transform);
 	}
 }

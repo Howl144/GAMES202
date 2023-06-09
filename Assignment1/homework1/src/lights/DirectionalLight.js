@@ -2,7 +2,7 @@ class DirectionalLight {
 
     constructor(lightIntensity, lightColor, lightPos, focalPoint, lightUp, hasShadowMap, gl) {
         //Edit Start 添加旋转参数
-        this.mesh = Mesh.cube(setTransform(0, 0, 0, 0, 0, 0, 0.5, 0.5, 0.5, 0));
+        this.mesh = Mesh.cube(setTransform(0, 0, 0, 0, 0, 0, 1, 1, 1));
         //Edit End
         this.mat = new EmissiveMaterial(lightIntensity, lightColor);
         this.lightPos = lightPos;
@@ -40,13 +40,13 @@ class DirectionalLight {
         mat4.lookAt(viewMatrix, this.lightPos, this.focalPoint, this.lightUp)
     
         // Projection transform
-        var r = 100;  
+        var r = 110;  
 	    var l = -r;  
-	    var t = 100;  
+	    var t = 110;  
 	    var b = -t;  
 	
 	    var n = 0.01;  
-	    var f = 200; 
+	    var f = 400; 
         //平行光阴影，投影矩阵可用正交矩阵，变换后仍然保持线性深度
         mat4.ortho(projectionMatrix, l, r, b, t, n, f);
 

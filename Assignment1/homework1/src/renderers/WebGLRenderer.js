@@ -4,7 +4,6 @@ class WebGLRenderer {
     //同时，一个物体的shadowMeshRender数量和光源的数量相同，shadowMeshRender和meshRender的mesh是同一个
     shadowMeshes = [];
     lights = [];
-
     constructor(gl, camera) {
         this.gl = gl;
         this.camera = camera;
@@ -36,14 +35,14 @@ class WebGLRenderer {
         console.assert(this.lights.length != 0, "No light");
         //console.assert(this.lights.length == 1, "Multiple lights"); //取消多光源检测
 
-        //Edit Start 角色旋转，地面不转(用顶点数筛选)
-        for (let i = 0; i < this.meshes.length; i++) {
-            if(this.meshes[i].mesh.count > 10)
-            {
-                //改变mesh.transform.rotate的值,同时对应的shadowMeshRender的mesh.transform.rotate也会改变
-                this.meshes[i].mesh.transform.rotate[1] = this.meshes[i].mesh.transform.rotate[1] + degrees2Radians(10) * deltaime;
-            }
-        }
+        // //Edit Start 角色旋转，地面不转(用顶点数筛选)
+        // for (let i = 0; i < this.meshes.length; i++) {
+        //     if(this.meshes[i].mesh.count > 10)
+        //     {
+        //         //改变mesh.transform.rotate的值,同时对应的shadowMeshRender的mesh.transform.rotate也会改变
+        //         this.meshes[i].mesh.transform.rotate[1] = this.meshes[i].mesh.transform.rotate[1] + degrees2Radians(10) * deltaime;
+        //     }
+        // }
         //Edit End
         /*实现光源围绕原点进行Y轴旋转，注意这里的旋转并不是模型变换里的旋转，这里旋转的结果是位置发生变化，最后真正产生了“旋转”的，是光照方向的朝向，其对应光源的观察变换。
         在Shadow Pass和Camera Pass中都判断一下当前MeshRender的材质的lightIndex与当前渲染中的光源的Index是否一致，不一致的跳过，不然会把不属于当前光源的MeshRender全部渲染一遍。
@@ -56,12 +55,15 @@ class WebGLRenderer {
             gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT); // 清除shadowmap上一帧的颜色、深度缓存，否则会一直叠加每一帧的结果
             //Edit End
 
-            // Draw light
-            // TODO: Support all kinds of transform
+            // // Draw light
+            // // TODO: Support all kinds of transform
             //Edit Start 灯光围绕原点旋转
-            let lightRotateSpped = [10, 80]
+            let hight = 60;
+            let lightRotateSpped = [10, 10, 10, 10]
             let lightPos = this.lights[l].entity.lightPos;
+            lightPos[1] = hight;
             lightPos = vec3.rotateY(lightPos, lightPos, this.lights[l].entity.focalPoint, degrees2Radians(lightRotateSpped[l]) * deltaime);
+            lightPos[1] = hight + Math.sin(degrees2Radians(lightRotateSpped[l]) * time / 1000) * 20;
             this.lights[l].entity.lightPos = lightPos; //给DirectionalLight的lightPos赋值新的位置，CalcLightMVP计算LightMVP需要用到
             this.lights[l].meshRender.mesh.transform.translate = lightPos;
             //Edit End
