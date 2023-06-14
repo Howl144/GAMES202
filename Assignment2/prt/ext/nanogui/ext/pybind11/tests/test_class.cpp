@@ -7,6 +7,13 @@
     BSD-style license that can be found in the LICENSE file.
 */
 
+#if defined(__INTEL_COMPILER) && __cplusplus >= 201703L
+// Intel compiler requires a separate header file to support aligned new operators
+// and does not set the __cpp_aligned_new feature macro.
+// This header needs to be included before pybind11.
+#include <aligned_new>
+#endif
+
 #include "pybind11_tests.h"
 #include "constructor_stats.h"
 #include "local_bindings.h"
@@ -157,11 +164,7 @@ TEST_SUBMODULE(class_, m) {
     });
 
     m.def("as_type", [](py::object ob) {
-        auto tp = py::type(ob);
-        if (py::isinstance<py::type>(ob))
-            return tp;
-        else
-            throw std::runtime_error("Invalid type");
+        return py::type(ob);
     });
 
     // test_mismatched_holder
@@ -172,12 +175,12 @@ TEST_SUBMODULE(class_, m) {
     struct MismatchDerived2 : MismatchBase2 { };
 
     m.def("mismatched_holder_1", []() {
-        auto mod = py::module::import("__main__");
+        auto mod = py::module_::import("__main__");
         py::class_<MismatchBase1, std::shared_ptr<MismatchBase1>>(mod, "MismatchBase1");
         py::class_<MismatchDerived1, MismatchBase1>(mod, "MismatchDerived1");
     });
     m.def("mismatched_holder_2", []() {
-        auto mod = py::module::import("__main__");
+        auto mod = py::module_::import("__main__");
         py::class_<MismatchBase2>(mod, "MismatchBase2");
         py::class_<MismatchDerived2, std::shared_ptr<MismatchDerived2>,
                    MismatchBase2>(mod, "MismatchDerived2");
@@ -235,7 +238,8 @@ TEST_SUBMODULE(class_, m) {
         };
 
         auto def = new PyMethodDef{"f", f, METH_VARARGS, nullptr};
-        return py::reinterpret_steal<py::object>(PyCFunction_NewEx(def, nullptr, m.ptr()));
+        py::capsule def_capsule(def, [](void *ptr) { delete reinterpret_cast<PyMethodDef *>(ptr); });
+        return py::reinterpret_steal<py::object>(PyCFunction_NewEx(def, def_capsule.ptr(), m.ptr()));
     }());
 
     // test_operator_new_delete
@@ -326,6 +330,10 @@ TEST_SUBMODULE(class_, m) {
 
     class PublicistB : public ProtectedB {
     public:
+        // [workaround(intel)] = default does not work here
+        // Removing or defaulting this destructor results in linking errors with the Intel compiler
+        // (in Debug builds only, tested with icpc (ICC) 2021.1 Beta 20200827)
+        ~PublicistB() override {};  // NOLINT(modernize-use-equals-default)
         using ProtectedB::foo;
     };
 
@@ -410,6 +418,7 @@ TEST_SUBMODULE(class_, m) {
     struct IsNonFinalFinal {};
     py::class_<IsNonFinalFinal>(m, "IsNonFinalFinal", py::is_final());
 
+    // test_exception_rvalue_abort
     struct PyPrintDestructor {
         PyPrintDestructor() = default;
         ~PyPrintDestructor() {
@@ -420,6 +429,55 @@ TEST_SUBMODULE(class_, m) {
     py::class_<PyPrintDestructor>(m, "PyPrintDestructor")
         .def(py::init<>())
         .def("throw_something", &PyPrintDestructor::throw_something);
+
+    // test_multiple_instances_with_same_pointer
+    struct SamePointer {};
+    static SamePointer samePointer;
+    py::class_<SamePointer, std::unique_ptr<SamePointer, py::nodelete>>(m, "SamePointer")
+        .def(py::init([]() { return &samePointer; }))
+        .def("__del__", [](SamePointer&) { py::print("__del__ called"); });
+
+    struct Empty {};
+    py::class_<Empty>(m, "Empty")
+        .def(py::init<>());
+
+    // test_base_and_derived_nested_scope
+    struct BaseWithNested {
+        struct Nested {};
+    };
+
+    struct DerivedWithNested : BaseWithNested {
+        struct Nested {};
+    };
+
+    py::class_<BaseWithNested> baseWithNested_class(m, "BaseWithNested");
+    py::class_<DerivedWithNested, BaseWithNested> derivedWithNested_class(m, "DerivedWithNested");
+    py::class_<BaseWithNested::Nested>(baseWithNested_class, "Nested")
+        .def_static("get_name", []() { return "BaseWithNested::Nested"; });
+    py::class_<DerivedWithNested::Nested>(derivedWithNested_class, "Nested")
+        .def_static("get_name", []() { return "DerivedWithNested::Nested"; });
+
+    // test_register_duplicate_class
+    struct Duplicate {};
+    struct OtherDuplicate {};
+    struct DuplicateNested {};
+    struct OtherDuplicateNested {};
+    m.def("register_duplicate_class_name", [](py::module_ m) {
+        py::class_<Duplicate>(m, "Duplicate");
+        py::class_<OtherDuplicate>(m, "Duplicate");
+    });
+    m.def("register_duplicate_class_type", [](py::module_ m) {
+        py::class_<OtherDuplicate>(m, "OtherDuplicate");
+        py::class_<OtherDuplicate>(m, "YetAnotherDuplicate");
+    });
+    m.def("register_duplicate_nested_class_name", [](py::object gt) {
+        py::class_<DuplicateNested>(gt, "DuplicateNested");
+        py::class_<OtherDuplicateNested>(gt, "DuplicateNested");
+    });
+    m.def("register_duplicate_nested_class_type", [](py::object gt) {
+        py::class_<OtherDuplicateNested>(gt, "OtherDuplicateNested");
+        py::class_<OtherDuplicateNested>(gt, "YetAnotherDuplicateNested");
+    });
 }
 
 template <int N> class BreaksBase { public:

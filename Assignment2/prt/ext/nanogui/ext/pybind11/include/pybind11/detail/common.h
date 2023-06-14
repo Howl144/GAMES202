@@ -11,7 +11,7 @@
 
 #define PYBIND11_VERSION_MAJOR 2
 #define PYBIND11_VERSION_MINOR 6
-#define PYBIND11_VERSION_PATCH 0.dev1
+#define PYBIND11_VERSION_PATCH 2
 
 #define PYBIND11_NAMESPACE_BEGIN(name) namespace name {
 #define PYBIND11_NAMESPACE_END(name) }
@@ -27,7 +27,7 @@
 #  endif
 #endif
 
-#if !(defined(_MSC_VER) && __cplusplus == 199711L) && !defined(__INTEL_COMPILER)
+#if !(defined(_MSC_VER) && __cplusplus == 199711L)
 #  if __cplusplus >= 201402L
 #    define PYBIND11_CPP14
 #    if __cplusplus >= 201703L
@@ -47,8 +47,10 @@
 
 // Compiler version assertions
 #if defined(__INTEL_COMPILER)
-#  if __INTEL_COMPILER < 1700
-#    error pybind11 requires Intel C++ compiler v17 or newer
+#  if __INTEL_COMPILER < 1800
+#    error pybind11 requires Intel C++ compiler v18 or newer
+#  elif __INTEL_COMPILER < 1900 && defined(PYBIND11_CPP14)
+#    error pybind11 supports only C++11 with Intel C++ compiler v18. Use v19 or newer for C++14.
 #  endif
 #elif defined(__clang__) && !defined(__apple_build_version__)
 #  if __clang_major__ < 3 || (__clang_major__ == 3 && __clang_minor__ < 3)
@@ -182,6 +184,7 @@
 #define PYBIND11_STR_TYPE ::pybind11::str
 #define PYBIND11_BOOL_ATTR "__bool__"
 #define PYBIND11_NB_BOOL(ptr) ((ptr)->nb_bool)
+#define PYBIND11_BUILTINS_MODULE "builtins"
 // Providing a separate declaration to make Clang's -Wmissing-prototypes happy.
 // See comment for PYBIND11_MODULE below for why this is marked "maybe unused".
 #define PYBIND11_PLUGIN_IMPL(name) \
@@ -209,6 +212,7 @@
 #define PYBIND11_STR_TYPE ::pybind11::bytes
 #define PYBIND11_BOOL_ATTR "__nonzero__"
 #define PYBIND11_NB_BOOL(ptr) ((ptr)->nb_nonzero)
+#define PYBIND11_BUILTINS_MODULE "__builtin__"
 // Providing a separate PyInit decl to make Clang's -Wmissing-prototypes happy.
 // See comment for PYBIND11_MODULE below for why this is marked "maybe unused".
 #define PYBIND11_PLUGIN_IMPL(name) \
@@ -263,13 +267,13 @@ extern "C" {
     ***Deprecated in favor of PYBIND11_MODULE***
 
     This macro creates the entry point that will be invoked when the Python interpreter
-    imports a plugin library. Please create a `module` in the function body and return
+    imports a plugin library. Please create a `module_` in the function body and return
     the pointer to its underlying Python object at the end.
 
     .. code-block:: cpp
 
         PYBIND11_PLUGIN(example) {
-            pybind11::module m("example", "pybind11 example plugin");
+            pybind11::module_ m("example", "pybind11 example plugin");
             /// Set up bindings here
             return m.ptr();
         }
@@ -290,7 +294,7 @@ extern "C" {
     This macro creates the entry point that will be invoked when the Python interpreter
     imports an extension module. The module name is given as the fist argument and it
     should not be in quotes. The second macro argument defines a variable of type
-    `py::module` which can be used to initialize the module.
+    `py::module_` which can be used to initialize the module.
 
     The entry point is marked as "maybe unused" to aid dead-code detection analysis:
     since the entry point is typically only looked up at runtime and not referenced
@@ -308,18 +312,22 @@ extern "C" {
         }
 \endrst */
 #define PYBIND11_MODULE(name, variable)                                        \
+    static ::pybind11::module_::module_def                                     \
+        PYBIND11_CONCAT(pybind11_module_def_, name) PYBIND11_MAYBE_UNUSED;     \
     PYBIND11_MAYBE_UNUSED                                                      \
-    static void PYBIND11_CONCAT(pybind11_init_, name)(pybind11::module &);     \
+    static void PYBIND11_CONCAT(pybind11_init_, name)(::pybind11::module_ &);  \
     PYBIND11_PLUGIN_IMPL(name) {                                               \
         PYBIND11_CHECK_PYTHON_VERSION                                          \
         PYBIND11_ENSURE_INTERNALS_READY                                        \
-        auto m = pybind11::module(PYBIND11_TOSTRING(name));                    \
+        auto m = ::pybind11::module_::create_extension_module(                 \
+            PYBIND11_TOSTRING(name), nullptr,                                  \
+            &PYBIND11_CONCAT(pybind11_module_def_, name));                     \
         try {                                                                  \
             PYBIND11_CONCAT(pybind11_init_, name)(m);                          \
             return m.ptr();                                                    \
         } PYBIND11_CATCH_INIT_EXCEPTIONS                                       \
     }                                                                          \
-    void PYBIND11_CONCAT(pybind11_init_, name)(pybind11::module &variable)
+    void PYBIND11_CONCAT(pybind11_init_, name)(::pybind11::module_ &variable)
 
 
 PYBIND11_NAMESPACE_BEGIN(PYBIND11_NAMESPACE)
@@ -488,7 +496,7 @@ using std::make_index_sequence;
 #else
 template<size_t ...> struct index_sequence  { };
 template<size_t N, size_t ...S> struct make_index_sequence_impl : make_index_sequence_impl <N - 1, N - 1, S...> { };
-template<size_t ...S> struct make_index_sequence_impl <0, S...> { typedef index_sequence<S...> type; };
+template<size_t ...S> struct make_index_sequence_impl <0, S...> { using type = index_sequence<S...>; };
 template<size_t N> using make_index_sequence = typename make_index_sequence_impl<N>::type;
 #endif
 
@@ -502,10 +510,10 @@ template <bool... Bs> using select_indices = typename select_indices_impl<index_
 template <bool B> using bool_constant = std::integral_constant<bool, B>;
 template <typename T> struct negation : bool_constant<!T::value> { };
 
-// PGI cannot detect operator delete with the "compatible" void_t impl, so
+// PGI/Intel cannot detect operator delete with the "compatible" void_t impl, so
 // using the new one (C++14 defect, so generally works on newer compilers, even
 // if not in C++17 mode)
-#if defined(__PGIC__)
+#if defined(__PGIC__) || defined(__INTEL_COMPILER)
 template<typename... > using void_t = void;
 #else
 template <typename...> struct void_t_impl { using type = void; };
@@ -618,8 +626,9 @@ template <typename Base, typename Derived> using is_strict_base_of = bool_consta
 
 /// Like is_base_of, but also requires that the base type is accessible (i.e. that a Derived pointer
 /// can be converted to a Base pointer)
+/// For unions, `is_base_of<T, T>::value` is False, so we need to check `is_same` as well.
 template <typename Base, typename Derived> using is_accessible_base_of = bool_constant<
-    std::is_base_of<Base, Derived>::value && std::is_convertible<Derived *, Base *>::value>;
+    (std::is_same<Base, Derived>::value || std::is_base_of<Base, Derived>::value) && std::is_convertible<Derived *, Base *>::value>;
 
 template <template<typename...> class Base>
 struct is_template_base_of_impl {
@@ -656,6 +665,10 @@ template <typename T> using is_function_pointer = bool_constant<
     std::is_pointer<T>::value && std::is_function<typename std::remove_pointer<T>::type>::value>;
 
 template <typename F> struct strip_function_object {
+    // If you are encountering an
+    // 'error: name followed by "::" must be a class or namespace name'
+    // with the Intel compiler and a noexcept function here,
+    // try to use noexcept(true) instead of plain noexcept.
     using type = typename remove_class<decltype(&F::operator())>::type;
 };
 
@@ -680,8 +693,10 @@ template <typename T> using is_lambda = satisfies_none_of<remove_reference_t<T>,
 /// Ignore that a variable is unused in compiler warnings
 inline void ignore_unused(const int *) { }
 
+// [workaround(intel)] Internal error on fold expression
 /// Apply a function over each element of a parameter pack
-#ifdef __cpp_fold_expressions
+#if defined(__cpp_fold_expressions) && !defined(__INTEL_COMPILER)
+// Intel compiler produces an internal error on this fold expression (tested with ICC 19.0.2)
 #define PYBIND11_EXPAND_SIDE_EFFECTS(PATTERN) (((PATTERN), void()), ...)
 #else
 using expand_side_effects = bool[];
@@ -839,8 +854,8 @@ public:
     const std::vector<T> *operator->() const { return &v; }
 };
 
+// Forward-declaration; see detail/class.h
+std::string get_fully_qualified_tp_name(PyTypeObject*);
+
 PYBIND11_NAMESPACE_END(detail)
-
-
-
 PYBIND11_NAMESPACE_END(PYBIND11_NAMESPACE)

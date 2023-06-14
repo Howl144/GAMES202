@@ -29,6 +29,7 @@
 #  pragma warning(disable: 4996) // warning C4996: The POSIX name for this item is deprecated. Instead, use the ISO C and C++ conformant name
 #  pragma warning(disable: 4702) // warning C4702: unreachable code
 #  pragma warning(disable: 4522) // warning C4522: multiple assignment operators specified
+#  pragma warning(disable: 4505) // warning C4505: 'PySlice_GetIndicesEx': unreferenced local function has been removed (PyPy only)
 #elif defined(__GNUG__) && !defined(__clang__)
 #  pragma GCC diagnostic push
 #  pragma GCC diagnostic ignored "-Wunused-but-set-parameter"
@@ -45,6 +46,11 @@
 #include "options.h"
 #include "detail/class.h"
 #include "detail/init.h"
+
+#include <memory>
+#include <vector>
+#include <string>
+#include <utility>
 
 #if defined(__GNUG__) && !defined(__clang__)
 #  include <cxxabi.h>
@@ -108,9 +114,16 @@ public:
     object name() const { return attr("__name__"); }
 
 protected:
+    struct InitializingFunctionRecordDeleter {
+        // `destruct(function_record, false)`: `initialize_generic` copies strings and
+        // takes care of cleaning up in case of exceptions. So pass `false` to `free_strings`.
+        void operator()(detail::function_record * rec) { destruct(rec, false); }
+    };
+    using unique_function_record = std::unique_ptr<detail::function_record, InitializingFunctionRecordDeleter>;
+
     /// Space optimization: don't inline this frequently instantiated fragment
-    PYBIND11_NOINLINE detail::function_record *make_function_record() {
-        return new detail::function_record();
+    PYBIND11_NOINLINE unique_function_record make_function_record() {
+        return unique_function_record(new detail::function_record());
     }
 
     /// Special internal constructor for functors, lambda functions, etc.
@@ -120,7 +133,9 @@ protected:
         struct capture { remove_reference_t<Func> f; };
 
         /* Store the function including any extra state it might have (e.g. a lambda capture object) */
-        auto rec = make_function_record();
+        // The unique_ptr makes sure nothing is leaked in case of an exception.
+        auto unique_rec = make_function_record();
+        auto rec = unique_rec.get();
 
         /* Store the capture object directly in the function record if there is enough space */
         if (sizeof(capture) <= sizeof(rec->data)) {
@@ -201,7 +216,8 @@ protected:
         PYBIND11_DESCR_CONSTEXPR auto types = decltype(signature)::types();
 
         /* Register the function with Python from generic (non-templated) code */
-        initialize_generic(rec, signature.text, types.data(), sizeof...(Args));
+        // Pass on the ownership over the `unique_rec` to `initialize_generic`. `rec` stays valid.
+        initialize_generic(std::move(unique_rec), signature.text, types.data(), sizeof...(Args));
 
         if (cast_in::has_args) rec->has_args = true;
         if (cast_in::has_kwargs) rec->has_kwargs = true;
@@ -217,27 +233,58 @@ protected:
         }
     }
 
+    // Utility class that keeps track of all duplicated strings, and cleans them up in its destructor,
+    // unless they are released. Basically a RAII-solution to deal with exceptions along the way.
+    class strdup_guard {
+    public:
+        ~strdup_guard() {
+            for (auto s : strings)
+                std::free(s);
+        }
+        char *operator()(const char *s) {
+            auto t = strdup(s);
+            strings.push_back(t);
+            return t;
+        }
+        void release() {
+            strings.clear();
+        }
+    private:
+        std::vector<char *> strings;
+    };
+
     /// Register a function call with Python (generic non-templated code goes here)
-    void initialize_generic(detail::function_record *rec, const char *text,
+    void initialize_generic(unique_function_record &&unique_rec, const char *text,
                             const std::type_info *const *types, size_t args) {
+        // Do NOT receive `unique_rec` by value. If this function fails to move out the unique_ptr,
+        // we do not want this to destuct the pointer. `initialize` (the caller) still relies on the
+        // pointee being alive after this call. Only move out if a `capsule` is going to keep it alive.
+        auto rec = unique_rec.get();
+
+        // Keep track of strdup'ed strings, and clean them up as long as the function's capsule
+        // has not taken ownership yet (when `unique_rec.release()` is called).
+        // Note: This cannot easily be fixed by a `unique_ptr` with custom deleter, because the strings
+        // are only referenced before strdup'ing. So only *after* the following block could `destruct`
+        // safely be called, but even then, `repr` could still throw in the middle of copying all strings.
+        strdup_guard guarded_strdup;
 
         /* Create copies of all referenced C-style strings */
-        rec->name = strdup(rec->name ? rec->name : "");
-        if (rec->doc) rec->doc = strdup(rec->doc);
+        rec->name = guarded_strdup(rec->name ? rec->name : "");
+        if (rec->doc) rec->doc = guarded_strdup(rec->doc);
         for (auto &a: rec->args) {
             if (a.name)
-                a.name = strdup(a.name);
+                a.name = guarded_strdup(a.name);
             if (a.descr)
-                a.descr = strdup(a.descr);
+                a.descr = guarded_strdup(a.descr);
             else if (a.value)
-                a.descr = strdup(repr(a.value).cast<std::string>().c_str());
+                a.descr = guarded_strdup(repr(a.value).cast<std::string>().c_str());
         }
 
         rec->is_constructor = !strcmp(rec->name, "__init__") || !strcmp(rec->name, "__setstate__");
 
 #if !defined(NDEBUG) && !defined(PYBIND11_DISABLE_NEW_STYLE_INIT_WARNING)
         if (rec->is_constructor && !rec->is_new_style_constructor) {
-            const auto class_name = std::string(((PyTypeObject *) rec->scope.ptr())->tp_name);
+            const auto class_name = detail::get_fully_qualified_tp_name((PyTypeObject *) rec->scope.ptr());
             const auto func_name = std::string(rec->name);
             PyErr_WarnEx(
                 PyExc_FutureWarning,
@@ -313,13 +360,13 @@ protected:
 #if PY_MAJOR_VERSION < 3
         if (strcmp(rec->name, "__next__") == 0) {
             std::free(rec->name);
-            rec->name = strdup("next");
+            rec->name = guarded_strdup("next");
         } else if (strcmp(rec->name, "__bool__") == 0) {
             std::free(rec->name);
-            rec->name = strdup("__nonzero__");
+            rec->name = guarded_strdup("__nonzero__");
         }
 #endif
-        rec->signature = strdup(signature.c_str());
+        rec->signature = guarded_strdup(signature.c_str());
         rec->args.shrink_to_fit();
         rec->nargs = (std::uint16_t) args;
 
@@ -350,9 +397,10 @@ protected:
             rec->def->ml_meth = reinterpret_cast<PyCFunction>(reinterpret_cast<void (*) (void)>(*dispatcher));
             rec->def->ml_flags = METH_VARARGS | METH_KEYWORDS;
 
-            capsule rec_capsule(rec, [](void *ptr) {
+            capsule rec_capsule(unique_rec.release(), [](void *ptr) {
                 destruct((detail::function_record *) ptr);
             });
+            guarded_strdup.release();
 
             object scope_module;
             if (rec->scope) {
@@ -367,10 +415,9 @@ protected:
             if (!m_ptr)
                 pybind11_fail("cpp_function::cpp_function(): Could not allocate function object");
         } else {
-            /* Append at the end of the overload chain */
+            /* Append at the beginning or end of the overload chain */
             m_ptr = rec->sibling.ptr();
             inc_ref();
-            chain_start = chain;
             if (chain->is_method != rec->is_method)
                 pybind11_fail("overloading a method with both static and instance methods is not supported; "
                     #if defined(NDEBUG)
@@ -380,9 +427,24 @@ protected:
                         std::string(pybind11::str(rec->scope.attr("__name__"))) + "." + std::string(rec->name) + signature
                     #endif
                 );
-            while (chain->next)
-                chain = chain->next;
-            chain->next = rec;
+
+            if (rec->prepend) {
+                // Beginning of chain; we need to replace the capsule's current head-of-the-chain
+                // pointer with this one, then make this one point to the previous head of the
+                // chain.
+                chain_start = rec;
+                rec->next = chain;
+                auto rec_capsule = reinterpret_borrow<capsule>(((PyCFunctionObject *) m_ptr)->m_self);
+                rec_capsule.set_pointer(unique_rec.release());
+                guarded_strdup.release();
+            } else {
+                // Or end of chain (normal behavior)
+                chain_start = chain;
+                while (chain->next)
+                    chain = chain->next;
+                chain->next = unique_rec.release();
+                guarded_strdup.release();
+            }
         }
 
         std::string signatures;
@@ -421,9 +483,9 @@ protected:
 
         /* Install docstring */
         auto *func = (PyCFunctionObject *) m_ptr;
-        if (func->m_ml->ml_doc)
-            std::free(const_cast<char *>(func->m_ml->ml_doc));
-        func->m_ml->ml_doc = strdup(signatures.c_str());
+        std::free(const_cast<char *>(func->m_ml->ml_doc));
+        // Install docstring if it's non-empty (when at least one option is enabled)
+        func->m_ml->ml_doc = signatures.empty() ? nullptr : strdup(signatures.c_str());
 
         if (rec->is_method) {
             m_ptr = PYBIND11_INSTANCE_METHOD_NEW(m_ptr, rec->scope.ptr());
@@ -434,22 +496,42 @@ protected:
     }
 
     /// When a cpp_function is GCed, release any memory allocated by pybind11
-    static void destruct(detail::function_record *rec) {
+    static void destruct(detail::function_record *rec, bool free_strings = true) {
+        // If on Python 3.9, check the interpreter "MICRO" (patch) version.
+        // If this is running on 3.9.0, we have to work around a bug.
+        #if !defined(PYPY_VERSION) && PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION == 9
+            static bool is_zero = Py_GetVersion()[4] == '0';
+        #endif
+
         while (rec) {
             detail::function_record *next = rec->next;
             if (rec->free_data)
                 rec->free_data(rec);
-            std::free((char *) rec->name);
-            std::free((char *) rec->doc);
-            std::free((char *) rec->signature);
-            for (auto &arg: rec->args) {
-                std::free(const_cast<char *>(arg.name));
-                std::free(const_cast<char *>(arg.descr));
-                arg.value.dec_ref();
+            // During initialization, these strings might not have been copied yet,
+            // so they cannot be freed. Once the function has been created, they can.
+            // Check `make_function_record` for more details.
+            if (free_strings) {
+                std::free((char *) rec->name);
+                std::free((char *) rec->doc);
+                std::free((char *) rec->signature);
+                for (auto &arg: rec->args) {
+                    std::free(const_cast<char *>(arg.name));
+                    std::free(const_cast<char *>(arg.descr));
+                }
             }
+            for (auto &arg: rec->args)
+                arg.value.dec_ref();
             if (rec->def) {
                 std::free(const_cast<char *>(rec->def->ml_doc));
-                delete rec->def;
+                // Python 3.9.0 decref's these in the wrong order; rec->def
+                // If loaded on 3.9.0, let these leak (use Python 3.9.1 at runtime to fix)
+                // See https://github.com/python/cpython/pull/22670
+                #if !defined(PYPY_VERSION) && PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION == 9
+                    if (!is_zero)
+                        delete rec->def;
+                #else
+                    delete rec->def;
+                #endif
             }
             delete rec;
             rec = next;
@@ -472,14 +554,14 @@ protected:
 
         auto self_value_and_holder = value_and_holder();
         if (overloads->is_constructor) {
-            const auto tinfo = get_type_info((PyTypeObject *) overloads->scope.ptr());
-            const auto pi = reinterpret_cast<instance *>(parent.ptr());
-            self_value_and_holder = pi->get_value_and_holder(tinfo, false);
-
-            if (!self_value_and_holder.type || !self_value_and_holder.inst) {
+            if (!PyObject_TypeCheck(parent.ptr(), (PyTypeObject *) overloads->scope.ptr())) {
                 PyErr_SetString(PyExc_TypeError, "__init__(self, ...) called with invalid `self` argument");
                 return nullptr;
             }
+
+            const auto tinfo = get_type_info((PyTypeObject *) overloads->scope.ptr());
+            const auto pi = reinterpret_cast<instance *>(parent.ptr());
+            self_value_and_holder = pi->get_value_and_holder(tinfo, true);
 
             // If this value is already registered it must mean __init__ is invoked multiple times;
             // we really can't support that in C++, so just ignore the second __init__.
@@ -574,15 +656,15 @@ protected:
                 // 1.5. Fill in any missing pos_only args from defaults if they exist
                 if (args_copied < func.nargs_pos_only) {
                     for (; args_copied < func.nargs_pos_only; ++args_copied) {
-                        const auto &arg = func.args[args_copied];
+                        const auto &arg_rec = func.args[args_copied];
                         handle value;
 
-                        if (arg.value) {
-                            value = arg.value;
+                        if (arg_rec.value) {
+                            value = arg_rec.value;
                         }
                         if (value) {
                             call.args.push_back(value);
-                            call.args_convert.push_back(arg.convert);
+                            call.args_convert.push_back(arg_rec.convert);
                         } else
                             break;
                     }
@@ -596,11 +678,11 @@ protected:
                     bool copied_kwargs = false;
 
                     for (; args_copied < num_args; ++args_copied) {
-                        const auto &arg = func.args[args_copied];
+                        const auto &arg_rec = func.args[args_copied];
 
                         handle value;
-                        if (kwargs_in && arg.name)
-                            value = PyDict_GetItemString(kwargs.ptr(), arg.name);
+                        if (kwargs_in && arg_rec.name)
+                            value = PyDict_GetItemString(kwargs.ptr(), arg_rec.name);
 
                         if (value) {
                             // Consume a kwargs value
@@ -608,14 +690,18 @@ protected:
                                 kwargs = reinterpret_steal<dict>(PyDict_Copy(kwargs.ptr()));
                                 copied_kwargs = true;
                             }
-                            PyDict_DelItemString(kwargs.ptr(), arg.name);
-                        } else if (arg.value) {
-                            value = arg.value;
+                            PyDict_DelItemString(kwargs.ptr(), arg_rec.name);
+                        } else if (arg_rec.value) {
+                            value = arg_rec.value;
+                        }
+
+                        if (!arg_rec.none && value.is_none()) {
+                            break;
                         }
 
                         if (value) {
                             call.args.push_back(value);
-                            call.args_convert.push_back(arg.convert);
+                            call.args_convert.push_back(arg_rec.convert);
                         }
                         else
                             break;
@@ -724,7 +810,7 @@ protected:
         } catch (error_already_set &e) {
             e.restore();
             return nullptr;
-#if defined(__GNUG__) && !defined(__clang__)
+#ifdef __GLIBCXX__
         } catch ( abi::__forced_unwind& ) {
             throw;
 #endif
@@ -857,22 +943,13 @@ public:
     PYBIND11_OBJECT_DEFAULT(module_, object, PyModule_Check)
 
     /// Create a new top-level Python module with the given name and docstring
+    PYBIND11_DEPRECATED("Use PYBIND11_MODULE or module_::create_extension_module instead")
     explicit module_(const char *name, const char *doc = nullptr) {
-        if (!options::show_user_defined_docstrings()) doc = nullptr;
 #if PY_MAJOR_VERSION >= 3
-        auto *def = new PyModuleDef();
-        std::memset(def, 0, sizeof(PyModuleDef));
-        def->m_name = name;
-        def->m_doc = doc;
-        def->m_size = -1;
-        Py_INCREF(def);
-        m_ptr = PyModule_Create(def);
+        *this = create_extension_module(name, doc, new PyModuleDef());
 #else
-        m_ptr = Py_InitModule3(name, nullptr, doc);
+        *this = create_extension_module(name, doc, nullptr);
 #endif
-        if (m_ptr == nullptr)
-            pybind11_fail("Internal error in module_::module_()");
-        inc_ref();
     }
 
     /** \rst
@@ -896,9 +973,9 @@ public:
 
         .. code-block:: cpp
 
-            py::module m("example", "pybind11 example plugin");
-            py::module m2 = m.def_submodule("sub", "A submodule of 'example'");
-            py::module m3 = m2.def_submodule("subsub", "A submodule of 'example.sub'");
+            py::module_ m("example", "pybind11 example plugin");
+            py::module_ m2 = m.def_submodule("sub", "A submodule of 'example'");
+            py::module_ m3 = m2.def_submodule("subsub", "A submodule of 'example.sub'");
     \endrst */
     module_ def_submodule(const char *name, const char *doc = nullptr) {
         std::string full_name = std::string(PyModule_GetName(m_ptr))
@@ -926,11 +1003,13 @@ public:
         *this = reinterpret_steal<module_>(obj);
     }
 
-    // Adds an object to the module using the given name.  Throws if an object with the given name
-    // already exists.
-    //
-    // overwrite should almost always be false: attempting to overwrite objects that pybind11 has
-    // established will, in most cases, break things.
+    /** \rst
+        Adds an object to the module using the given name.  Throws if an object with the given name
+        already exists.
+
+        ``overwrite`` should almost always be false: attempting to overwrite objects that pybind11 has
+        established will, in most cases, break things.
+    \endrst */
     PYBIND11_NOINLINE void add_object(const char *name, handle obj, bool overwrite = false) {
         if (!overwrite && hasattr(*this, name))
             pybind11_fail("Error during initialization: multiple incompatible definitions with name \"" +
@@ -938,8 +1017,53 @@ public:
 
         PyModule_AddObject(ptr(), name, obj.inc_ref().ptr() /* steals a reference */);
     }
+
+#if PY_MAJOR_VERSION >= 3
+    using module_def = PyModuleDef;
+#else
+    struct module_def {};
+#endif
+
+    /** \rst
+        Create a new top-level module that can be used as the main module of a C extension.
+
+        For Python 3, ``def`` should point to a statically allocated module_def.
+        For Python 2, ``def`` can be a nullptr and is completely ignored.
+    \endrst */
+    static module_ create_extension_module(const char *name, const char *doc, module_def *def) {
+#if PY_MAJOR_VERSION >= 3
+        // module_def is PyModuleDef
+        def = new (def) PyModuleDef {  // Placement new (not an allocation).
+            /* m_base */     PyModuleDef_HEAD_INIT,
+            /* m_name */     name,
+            /* m_doc */      options::show_user_defined_docstrings() ? doc : nullptr,
+            /* m_size */     -1,
+            /* m_methods */  nullptr,
+            /* m_slots */    nullptr,
+            /* m_traverse */ nullptr,
+            /* m_clear */    nullptr,
+            /* m_free */     nullptr
+        };
+        auto m = PyModule_Create(def);
+#else
+        // Ignore module_def *def; only necessary for Python 3
+        (void) def;
+        auto m = Py_InitModule3(name, nullptr, options::show_user_defined_docstrings() ? doc : nullptr);
+#endif
+        if (m == nullptr) {
+            if (PyErr_Occurred())
+                throw error_already_set();
+            pybind11_fail("Internal error in module_::create_extension_module()");
+        }
+        // TODO: Should be reinterpret_steal for Python 3, but Python also steals it again when returned from PyInit_...
+        //       For Python 2, reinterpret_borrow is correct.
+        return reinterpret_borrow<module_>(m);
+    }
 };
 
+// When inside a namespace (or anywhere as long as it's not the first item on a line),
+// C++20 allows "module" to be used. This is provided for backward compatibility, and for
+// simplicity, if someone wants to use py::module for example, that is perfectly safe.
 using module = module_;
 
 /// \ingroup python_builtins
@@ -947,18 +1071,17 @@ using module = module_;
 /// or ``__main__.__dict__`` if there is no frame (usually when the interpreter is embedded).
 inline dict globals() {
     PyObject *p = PyEval_GetGlobals();
-    return reinterpret_borrow<dict>(p ? p : module::import("__main__").attr("__dict__").ptr());
+    return reinterpret_borrow<dict>(p ? p : module_::import("__main__").attr("__dict__").ptr());
 }
 
 PYBIND11_NAMESPACE_BEGIN(detail)
 /// Generic support for creating new Python heap types
 class generic_type : public object {
-    template <typename...> friend class class_;
 public:
     PYBIND11_OBJECT_DEFAULT(generic_type, object, PyType_Check)
 protected:
     void initialize(const type_record &rec) {
-        if (rec.scope && hasattr(rec.scope, rec.name))
+        if (rec.scope && hasattr(rec.scope, "__dict__") && rec.scope.attr("__dict__").contains(rec.name))
             pybind11_fail("generic_type: cannot initialize type \"" + std::string(rec.name) +
                           "\": an object with that name is already defined");
 
@@ -1028,7 +1151,7 @@ protected:
         if (!type->ht_type.tp_as_buffer)
             pybind11_fail(
                 "To be able to register buffer protocol support for the type '" +
-                std::string(tinfo->type->tp_name) +
+                get_fully_qualified_tp_name(tinfo->type) +
                 "' the associated class<>(..) invocation must "
                 "include the pybind11::buffer_protocol() annotation!");
 
@@ -1242,7 +1365,8 @@ public:
         return *this;
     }
 
-    template <typename Func> class_& def_buffer(Func &&func) {
+    template <typename Func>
+    class_& def_buffer(Func &&func) {
         struct capture { Func func; };
         auto *ptr = new capture { std::forward<Func>(func) };
         install_buffer_funcs([](PyObject *obj, void *ptr) -> buffer_info* {
@@ -1251,6 +1375,10 @@ public:
                 return nullptr;
             return new buffer_info(((capture *) ptr)->func(caster));
         }, ptr);
+        weakref(m_ptr, cpp_function([ptr](handle wr) {
+            delete ptr;
+            wr.dec_ref();
+        })).release();
         return *this;
     }
 
@@ -1481,6 +1609,16 @@ detail::initimpl::pickle_factory<GetState, SetState> pickle(GetState &&g, SetSta
 }
 
 PYBIND11_NAMESPACE_BEGIN(detail)
+
+inline str enum_name(handle arg) {
+    dict entries = arg.get_type().attr("__entries");
+    for (auto kv : entries) {
+        if (handle(kv.second[int_(0)]).equal(arg))
+            return pybind11::str(kv.first);
+    }
+    return "???";
+}
+
 struct enum_base {
     enum_base(handle base, handle parent) : m_base(base), m_parent(parent) { }
 
@@ -1490,29 +1628,21 @@ struct enum_base {
         auto static_property = handle((PyObject *) get_internals().static_property_type);
 
         m_base.attr("__repr__") = cpp_function(
-            [](handle arg) -> str {
+            [](object arg) -> str {
                 handle type = type::handle_of(arg);
                 object type_name = type.attr("__name__");
-                dict entries = type.attr("__entries");
-                for (const auto &kv : entries) {
-                    object other = kv.second[int_(0)];
-                    if (other.equal(arg))
-                        return pybind11::str("{}.{}").format(type_name, kv.first);
-                }
-                return pybind11::str("{}.???").format(type_name);
+                return pybind11::str("<{}.{}: {}>").format(type_name, enum_name(arg), int_(arg));
             }, name("__repr__"), is_method(m_base)
         );
 
-        m_base.attr("name") = property(cpp_function(
+        m_base.attr("name") = property(cpp_function(&enum_name, name("name"), is_method(m_base)));
+
+        m_base.attr("__str__") = cpp_function(
             [](handle arg) -> str {
-                dict entries = type::handle_of(arg).attr("__entries");
-                for (const auto &kv : entries) {
-                    if (handle(kv.second[int_(0)]).equal(arg))
-                        return pybind11::str(kv.first);
-                }
-                return "???";
+                object type_name = type::handle_of(arg).attr("__name__");
+                return pybind11::str("{}.{}").format(type_name, enum_name(arg));
             }, name("name"), is_method(m_base)
-        ));
+        );
 
         m_base.attr("__doc__") = static_property(cpp_function(
             [](handle arg) -> std::string {
@@ -1521,7 +1651,7 @@ struct enum_base {
                 if (((PyTypeObject *) arg.ptr())->tp_doc)
                     docstring += std::string(((PyTypeObject *) arg.ptr())->tp_doc) + "\n\n";
                 docstring += "Members:";
-                for (const auto &kv : entries) {
+                for (auto kv : entries) {
                     auto key = std::string(pybind11::str(kv.first));
                     auto comment = kv.second[int_(1)];
                     docstring += "\n\n  " + key;
@@ -1535,7 +1665,7 @@ struct enum_base {
         m_base.attr("__members__") = static_property(cpp_function(
             [](handle arg) -> dict {
                 dict entries = arg.attr("__entries"), m;
-                for (const auto &kv : entries)
+                for (auto kv : entries)
                     m[kv.first] = kv.second[int_(0)];
                 return m;
             }, name("__members__")), none(), none(), ""
@@ -1548,7 +1678,7 @@ struct enum_base {
                         strict_behavior;                                               \
                     return expr;                                                       \
                 },                                                                     \
-                name(op), is_method(m_base))
+                name(op), is_method(m_base), arg("other"))
 
         #define PYBIND11_ENUM_OP_CONV(op, expr)                                        \
             m_base.attr(op) = cpp_function(                                            \
@@ -1556,7 +1686,7 @@ struct enum_base {
                     int_ a(a_), b(b_);                                                 \
                     return expr;                                                       \
                 },                                                                     \
-                name(op), is_method(m_base))
+                name(op), is_method(m_base), arg("other"))
 
         #define PYBIND11_ENUM_OP_CONV_LHS(op, expr)                                    \
             m_base.attr(op) = cpp_function(                                            \
@@ -1564,7 +1694,7 @@ struct enum_base {
                     int_ a(a_);                                                        \
                     return expr;                                                       \
                 },                                                                     \
-                name(op), is_method(m_base))
+                name(op), is_method(m_base), arg("other"))
 
         if (is_convertible) {
             PYBIND11_ENUM_OP_CONV_LHS("__eq__", !b.is_none() &&  a.equal(b));
@@ -1623,7 +1753,7 @@ struct enum_base {
 
     PYBIND11_NOINLINE void export_values() {
         dict entries = m_base.attr("__entries");
-        for (const auto &kv : entries)
+        for (auto kv : entries)
             m_parent.attr(kv.first) = kv.second[int_(0)];
     }
 
@@ -1650,7 +1780,8 @@ public:
         constexpr bool is_convertible = std::is_convertible<Type, Scalar>::value;
         m_base.init(is_arithmetic, is_convertible);
 
-        def(init([](Scalar i) { return static_cast<Type>(i); }));
+        def(init([](Scalar i) { return static_cast<Type>(i); }), arg("value"));
+        def_property_readonly("value", [](Type value) { return (Scalar) value; });
         def("__int__", [](Type value) { return (Scalar) value; });
         #if PY_MAJOR_VERSION < 3
             def("__long__", [](Type value) { return (Scalar) value; });
@@ -1664,7 +1795,7 @@ public:
                 detail::initimpl::setstate<Base>(v_h, static_cast<Type>(arg),
                         Py_TYPE(v_h.inst) != v_h.type->type); },
             detail::is_new_style_constructor(),
-            pybind11::name("__setstate__"), is_method(*this));
+            pybind11::name("__setstate__"), is_method(*this), arg("state"));
     }
 
     /// Export enumeration entries into the parent scope
@@ -1762,7 +1893,7 @@ template <return_value_policy Policy = return_value_policy::reference_internal,
           typename ValueType = decltype(*std::declval<Iterator>()),
           typename... Extra>
 iterator make_iterator(Iterator first, Sentinel last, Extra &&... extra) {
-    typedef detail::iterator_state<Iterator, Sentinel, false, Policy> state;
+    using state = detail::iterator_state<Iterator, Sentinel, false, Policy>;
 
     if (!detail::get_type_info(typeid(state), false)) {
         class_<state>(handle(), "iterator", pybind11::module_local())
@@ -1829,7 +1960,7 @@ template <return_value_policy Policy = return_value_policy::reference_internal,
 template <typename InputType, typename OutputType> void implicitly_convertible() {
     struct set_flag {
         bool &flag;
-        set_flag(bool &flag) : flag(flag) { flag = true; }
+        set_flag(bool &flag_) : flag(flag_) { flag_ = true; }
         ~set_flag() { flag = false; }
     };
     auto implicit_caster = [](PyObject *obj, PyTypeObject *type) -> PyObject * {
@@ -1874,7 +2005,7 @@ public:
         std::string full_name = scope.attr("__name__").cast<std::string>() +
                                 std::string(".") + name;
         m_ptr = PyErr_NewException(const_cast<char *>(full_name.c_str()), base.ptr(), NULL);
-        if (hasattr(scope, name))
+        if (hasattr(scope, "__dict__") && scope.attr("__dict__").contains(name))
             pybind11_fail("Error during initialization: multiple incompatible "
                           "definitions with name \"" + std::string(name) + "\"");
         scope.attr(name) = *this;
@@ -1932,7 +2063,7 @@ PYBIND11_NOINLINE inline void print(tuple args, dict kwargs) {
         file = kwargs["file"].cast<object>();
     } else {
         try {
-            file = module::import("sys").attr("stdout");
+            file = module_::import("sys").attr("stdout");
         } catch (const error_already_set &) {
             /* If print() is called from code that is executed as
                part of garbage collection during interpreter shutdown,
@@ -2009,15 +2140,7 @@ public:
         }
 
         if (release) {
-            /* Work around an annoying assertion in PyThreadState_Swap */
-            #if defined(Py_DEBUG)
-                PyInterpreterState *interp = tstate->interp;
-                tstate->interp = nullptr;
-            #endif
             PyEval_AcquireThread(tstate);
-            #if defined(Py_DEBUG)
-                tstate->interp = interp;
-            #endif
         }
 
         inc_ref();
@@ -2041,10 +2164,20 @@ public:
                     pybind11_fail("scoped_acquire::dec_ref(): internal error!");
             #endif
             PyThreadState_Clear(tstate);
-            PyThreadState_DeleteCurrent();
+            if (active)
+                PyThreadState_DeleteCurrent();
             PYBIND11_TLS_DELETE_VALUE(detail::get_internals().tstate);
             release = false;
         }
+    }
+
+    /// This method will disable the PyThreadState_DeleteCurrent call and the
+    /// GIL won't be acquired. This method should be used if the interpreter
+    /// could be shutting down when this is called, as thread deletion is not
+    /// allowed during shutdown. Check _Py_IsFinalizing() on Python 3.7+, and
+    /// protect subsequent code.
+    PYBIND11_NOINLINE void disarm() {
+        active = false;
     }
 
     PYBIND11_NOINLINE ~gil_scoped_acquire() {
@@ -2055,6 +2188,7 @@ public:
 private:
     PyThreadState *tstate = nullptr;
     bool release = true;
+    bool active = true;
 };
 
 class gil_scoped_release {
@@ -2070,10 +2204,22 @@ public:
             PYBIND11_TLS_DELETE_VALUE(key);
         }
     }
+
+    /// This method will disable the PyThreadState_DeleteCurrent call and the
+    /// GIL won't be acquired. This method should be used if the interpreter
+    /// could be shutting down when this is called, as thread deletion is not
+    /// allowed during shutdown. Check _Py_IsFinalizing() on Python 3.7+, and
+    /// protect subsequent code.
+    PYBIND11_NOINLINE void disarm() {
+        active = false;
+    }
+
     ~gil_scoped_release() {
         if (!tstate)
             return;
-        PyEval_RestoreThread(tstate);
+        // `PyEval_RestoreThread()` should not be called if runtime is finalizing
+        if (active)
+            PyEval_RestoreThread(tstate);
         if (disassoc) {
             auto key = detail::get_internals().tstate;
             PYBIND11_TLS_REPLACE_VALUE(key, tstate);
@@ -2082,6 +2228,7 @@ public:
 private:
     PyThreadState *tstate;
     bool disassoc;
+    bool active = true;
 };
 #elif defined(PYPY_VERSION)
 class gil_scoped_acquire {
@@ -2089,6 +2236,7 @@ class gil_scoped_acquire {
 public:
     gil_scoped_acquire() { state = PyGILState_Ensure(); }
     ~gil_scoped_acquire() { PyGILState_Release(state); }
+    void disarm() {}
 };
 
 class gil_scoped_release {
@@ -2096,10 +2244,15 @@ class gil_scoped_release {
 public:
     gil_scoped_release() { state = PyEval_SaveThread(); }
     ~gil_scoped_release() { PyEval_RestoreThread(state); }
+    void disarm() {}
 };
 #else
-class gil_scoped_acquire { };
-class gil_scoped_release { };
+class gil_scoped_acquire {
+    void disarm() {}
+};
+class gil_scoped_release {
+    void disarm() {}
+};
 #endif
 
 error_already_set::~error_already_set() {
@@ -2174,7 +2327,7 @@ PYBIND11_NAMESPACE_END(detail)
 /** \rst
   Try to retrieve a python method by the provided name from the instance pointed to by the this_ptr.
 
-  :this_ptr: The pointer to the object the overriden method should be retrieved for. This should be
+  :this_ptr: The pointer to the object the overridden method should be retrieved for. This should be
              the first non-trampoline class encountered in the inheritance chain.
   :name: The name of the overridden Python method to retrieve.
   :return: The Python method by this name from the object or an empty function wrapper.

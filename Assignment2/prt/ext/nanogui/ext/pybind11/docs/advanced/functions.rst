@@ -17,7 +17,7 @@ bindings for functions that return a non-trivial type. Just by looking at the
 type information, it is not clear whether Python should take charge of the
 returned value and eventually free its resources, or if this is handled on the
 C++ side. For this reason, pybind11 provides a several *return value policy*
-annotations that can be passed to the :func:`module::def` and
+annotations that can be passed to the :func:`module_::def` and
 :func:`class_::def` functions. The default policy is
 :enum:`return_value_policy::automatic`.
 
@@ -524,6 +524,8 @@ The default behaviour when the tag is unspecified is to allow ``None``.
     not allow ``None`` as argument.  To pass optional argument of these copied types consider
     using ``std::optional<T>``
 
+.. _overload_resolution:
+
 Overload resolution order
 =========================
 
@@ -540,11 +542,13 @@ an explicit ``py::arg().noconvert()`` attribute in the function definition).
 If the second pass also fails a ``TypeError`` is raised.
 
 Within each pass, overloads are tried in the order they were registered with
-pybind11.
+pybind11. If the ``py::prepend()`` tag is added to the definition, a function
+can be placed at the beginning of the overload sequence instead, allowing user
+overloads to proceed built in functions.
 
 What this means in practice is that pybind11 will prefer any overload that does
-not require conversion of arguments to an overload that does, but otherwise prefers
-earlier-defined overloads to later-defined ones.
+not require conversion of arguments to an overload that does, but otherwise
+prefers earlier-defined overloads to later-defined ones.
 
 .. note::
 
@@ -553,3 +557,7 @@ earlier-defined overloads to later-defined ones.
     requiring one conversion over one requiring three, but only prioritizes
     overloads requiring no conversion at all to overloads that require
     conversion of at least one argument.
+
+.. versionadded:: 2.6
+
+    The ``py::prepend()`` tag.

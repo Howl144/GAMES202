@@ -24,7 +24,7 @@ include(CMakeParseArguments)
 # Usage:
 #   pybind11_filter_tests(LISTNAME file1.cpp file2.cpp ... MESSAGE "")
 #
-macro(PYBIND11_FILTER_TESTS LISTNAME)
+macro(pybind11_filter_tests LISTNAME)
   cmake_parse_arguments(ARG "" "MESSAGE" "" ${ARGN})
   set(PYBIND11_FILTER_TESTS_FOUND OFF)
   foreach(filename IN LISTS ARG_UNPARSED_ARGUMENTS)
@@ -37,6 +37,14 @@ macro(PYBIND11_FILTER_TESTS LISTNAME)
   if(PYBIND11_FILTER_TESTS_FOUND AND ARG_MESSAGE)
     message(STATUS "${ARG_MESSAGE}")
   endif()
+endmacro()
+
+macro(possibly_uninitialized)
+  foreach(VARNAME ${ARGN})
+    if(NOT DEFINED "${VARNAME}")
+      set("${VARNAME}" "")
+    endif()
+  endforeach()
 endmacro()
 
 # New Python support
@@ -67,7 +75,7 @@ if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
   find_package(pybind11 REQUIRED CONFIG)
 endif()
 
-if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+if(NOT CMAKE_BUILD_TYPE AND NOT DEFINED CMAKE_CONFIGURATION_TYPES)
   message(STATUS "Setting tests build type to MinSizeRel as none was specified")
   set(CMAKE_BUILD_TYPE
       MinSizeRel
@@ -174,7 +182,7 @@ if(PYBIND11_TEST_FILES_EIGEN_I GREATER -1)
       message(FATAL_ERROR "CMake 3.11+ required when using DOWNLOAD_EIGEN")
     endif()
 
-    set(EIGEN3_VERSION_STRING "3.3.7")
+    set(EIGEN3_VERSION_STRING "3.3.8")
 
     include(FetchContent)
     FetchContent_Declare(
@@ -226,12 +234,12 @@ find_package(Boost 1.56)
 
 if(Boost_FOUND)
   if(NOT TARGET Boost::headers)
+    add_library(Boost::headers IMPORTED INTERFACE)
     if(TARGET Boost::boost)
       # Classic FindBoost
-      add_library(Boost::headers ALIAS Boost::boost)
+      set_property(TARGET Boost::boost PROPERTY INTERFACE_LINK_LIBRARIES Boost::boost)
     else()
       # Very old FindBoost, or newer Boost than CMake in older CMakes
-      add_library(Boost::headers IMPORTED INTERFACE)
       set_property(TARGET Boost::headers PROPERTY INTERFACE_INCLUDE_DIRECTORIES
                                                   ${Boost_INCLUDE_DIRS})
     endif()
@@ -243,8 +251,15 @@ function(pybind11_enable_warnings target_name)
   if(MSVC)
     target_compile_options(${target_name} PRIVATE /W4)
   elseif(CMAKE_CXX_COMPILER_ID MATCHES "(GNU|Intel|Clang)" AND NOT PYBIND11_CUDA_TESTS)
-    target_compile_options(${target_name} PRIVATE -Wall -Wextra -Wconversion -Wcast-qual
-                                                  -Wdeprecated -Wundef)
+    target_compile_options(
+      ${target_name}
+      PRIVATE -Wall
+              -Wextra
+              -Wconversion
+              -Wcast-qual
+              -Wdeprecated
+              -Wundef
+              -Wnon-virtual-dtor)
   endif()
 
   if(PYBIND11_WERROR)
@@ -338,33 +353,19 @@ foreach(target ${test_targets})
   if(NOT CMAKE_LIBRARY_OUTPUT_DIRECTORY)
     set_target_properties(${target} PROPERTIES LIBRARY_OUTPUT_DIRECTORY
                                                "${CMAKE_CURRENT_BINARY_DIR}")
-    foreach(config ${CMAKE_CONFIGURATION_TYPES})
-      string(TOUPPER ${config} config)
-      set_target_properties(${target} PROPERTIES LIBRARY_OUTPUT_DIRECTORY_${config}
-                                                 "${CMAKE_CURRENT_BINARY_DIR}")
-    endforeach()
+
+    if(DEFINED CMAKE_CONFIGURATION_TYPES)
+      foreach(config ${CMAKE_CONFIGURATION_TYPES})
+        string(TOUPPER ${config} config)
+        set_target_properties(${target} PROPERTIES LIBRARY_OUTPUT_DIRECTORY_${config}
+                                                   "${CMAKE_CURRENT_BINARY_DIR}")
+      endforeach()
+    endif()
   endif()
 endforeach()
 
 # Make sure pytest is found or produce a warning
-if(NOT PYBIND11_PYTEST_FOUND)
-  execute_process(
-    COMMAND ${PYTHON_EXECUTABLE} -c "import pytest; print(pytest.__version__)"
-    RESULT_VARIABLE pytest_not_found
-    OUTPUT_VARIABLE pytest_version
-    ERROR_QUIET)
-  if(pytest_not_found)
-    message(WARNING "Running the tests requires pytest. Please install it manually"
-                    " (try: ${PYTHON_EXECUTABLE} -m pip install pytest)")
-  elseif(pytest_version VERSION_LESS 3.1)
-    message(WARNING "Running the tests requires pytest >= 3.1. Found: ${pytest_version}"
-                    "Please update it (try: ${PYTHON_EXECUTABLE} -m pip install -U pytest)")
-  else()
-    set(PYBIND11_PYTEST_FOUND
-        TRUE
-        CACHE INTERNAL "")
-  endif()
-endif()
+pybind11_find_import(pytest VERSION 3.1)
 
 if(NOT CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_CURRENT_BINARY_DIR)
   # This is not used later in the build, so it's okay to regenerate each time.
@@ -377,15 +378,20 @@ endif()
 
 # cmake 3.12 added list(transform <list> prepend
 # but we can't use it yet
-string(REPLACE "test_" "${CMAKE_CURRENT_BINARY_DIR}/test_" PYBIND11_BINARY_TEST_FILES
+string(REPLACE "test_" "${CMAKE_CURRENT_SOURCE_DIR}/test_" PYBIND11_ABS_PYTEST_FILES
                "${PYBIND11_PYTEST_FILES}")
+
+set(PYBIND11_TEST_PREFIX_COMMAND
+    ""
+    CACHE STRING "Put this before pytest, use for checkers and such")
 
 # A single command to compile and run the tests
 add_custom_target(
   pytest
-  COMMAND ${PYTHON_EXECUTABLE} -m pytest ${PYBIND11_BINARY_PYTEST_FILES}
+  COMMAND ${PYBIND11_TEST_PREFIX_COMMAND} ${PYTHON_EXECUTABLE} -m pytest
+          ${PYBIND11_ABS_PYTEST_FILES}
   DEPENDS ${test_targets}
-  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+  WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
   USES_TERMINAL)
 
 if(PYBIND11_TEST_OVERRIDE)
@@ -395,6 +401,27 @@ if(PYBIND11_TEST_OVERRIDE)
     COMMAND ${CMAKE_COMMAND} -E echo
             "Note: not all tests run: -DPYBIND11_TEST_OVERRIDE is in effect")
 endif()
+
+# cmake-format: off
+add_custom_target(
+  memcheck
+  COMMAND
+    PYTHONMALLOC=malloc
+    valgrind
+    --leak-check=full
+    --show-leak-kinds=definite,indirect
+    --errors-for-leak-kinds=definite,indirect
+    --error-exitcode=1
+    --read-var-info=yes
+    --track-origins=yes
+    --suppressions="${CMAKE_CURRENT_SOURCE_DIR}/valgrind-python.supp"
+    --suppressions="${CMAKE_CURRENT_SOURCE_DIR}/valgrind-numpy-scipy.supp"
+    --gen-suppressions=all
+    ${PYTHON_EXECUTABLE} -m pytest ${PYBIND11_ABS_PYTEST_FILES}
+  DEPENDS ${test_targets}
+  WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+  USES_TERMINAL)
+# cmake-format: on
 
 # Add a check target to run all the tests, starting with pytest (we add dependencies to this below)
 add_custom_target(check DEPENDS pytest)

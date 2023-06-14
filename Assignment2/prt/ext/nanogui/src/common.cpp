@@ -52,6 +52,7 @@ void init() {
 
     #if defined(__APPLE__)
         disable_saved_application_state_osx();
+        glfwInitHint(GLFW_COCOA_CHDIR_RESOURCES, GLFW_FALSE);
     #endif
 
     glfwSetErrorCallback(
@@ -205,6 +206,15 @@ void leave() {
 bool active() {
     return mainloop_active;
 }
+
+std::pair<bool, bool> test_10bit_edr_support() {
+#if defined(NANOGUI_USE_METAL)
+    return metal_10bit_edr_support();
+#else
+    return { false, false };
+#endif
+}
+
 
 void shutdown() {
     glfwTerminate();

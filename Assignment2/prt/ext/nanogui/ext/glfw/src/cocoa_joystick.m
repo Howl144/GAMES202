@@ -1,5 +1,5 @@
 //========================================================================
-// GLFW 3.3 Cocoa - www.glfw.org
+// GLFW 3.4 Cocoa - www.glfw.org
 //------------------------------------------------------------------------
 // Copyright (c) 2009-2019 Camilla Löwy <elmindreda@glfw.org>
 // Copyright (c) 2012 Torsten Walluhn <tw@mad-cad.net>
@@ -23,6 +23,8 @@
 // 3. This notice may not be removed or altered from any source
 //    distribution.
 //
+//========================================================================
+// It is fine to use C99 in this file because it will not be built with VS
 //========================================================================
 
 #include "internal.h"
@@ -302,12 +304,10 @@ static void removeCallback(void* context,
 
 
 //////////////////////////////////////////////////////////////////////////
-//////                       GLFW internal API                      //////
+//////                       GLFW platform API                      //////
 //////////////////////////////////////////////////////////////////////////
 
-// Initialize joystick interface
-//
-void _glfwInitJoysticksNS(void)
+GLFWbool _glfwPlatformInitJoysticks(void)
 {
     CFMutableArrayRef matching;
     const long usages[] =
@@ -326,10 +326,10 @@ void _glfwInitJoysticksNS(void)
     if (!matching)
     {
         _glfwInputError(GLFW_PLATFORM_ERROR, "Cocoa: Failed to create array");
-        return;
+        return GLFW_FALSE;
     }
 
-    for (int i = 0;  i < sizeof(usages) / sizeof(long);  i++)
+    for (size_t i = 0;  i < sizeof(usages) / sizeof(long);  i++)
     {
         const long page = kHIDPage_GenericDesktop;
 
@@ -381,25 +381,23 @@ void _glfwInitJoysticksNS(void)
     // Execute the run loop once in order to register any initially-attached
     // joysticks
     CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0, false);
+    return GLFW_TRUE;
 }
 
-// Close all opened joystick handles
-//
-void _glfwTerminateJoysticksNS(void)
+void _glfwPlatformTerminateJoysticks(void)
 {
     int jid;
 
     for (jid = 0;  jid <= GLFW_JOYSTICK_LAST;  jid++)
         closeJoystick(_glfw.joysticks + jid);
 
-    CFRelease(_glfw.ns.hidManager);
-    _glfw.ns.hidManager = NULL;
+    if (_glfw.ns.hidManager)
+    {
+        CFRelease(_glfw.ns.hidManager);
+        _glfw.ns.hidManager = NULL;
+    }
 }
 
-
-//////////////////////////////////////////////////////////////////////////
-//////                       GLFW platform API                      //////
-//////////////////////////////////////////////////////////////////////////
 
 int _glfwPlatformPollJoystick(_GLFWjoystick* js, int mode)
 {

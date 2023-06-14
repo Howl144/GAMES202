@@ -812,11 +812,18 @@ PYBIND11_NAMESPACE_END(detail)
     : Parent(check_(o) ? o.release().ptr() : ConvertFun(o.ptr()), stolen_t{}) \
     { if (!m_ptr) throw error_already_set(); }
 
+#define PYBIND11_OBJECT_CHECK_FAILED(Name, o_ptr) \
+    ::pybind11::type_error("Object of type '" + \
+                           ::pybind11::detail::get_fully_qualified_tp_name(Py_TYPE(o_ptr)) + \
+                           "' is not an instance of '" #Name "'")
+
 #define PYBIND11_OBJECT(Name, Parent, CheckFun) \
     PYBIND11_OBJECT_COMMON(Name, Parent, CheckFun) \
     /* This is deliberately not 'explicit' to allow implicit conversion from object: */ \
-    Name(const object &o) : Parent(o) { } \
-    Name(object &&o) : Parent(std::move(o)) { }
+    Name(const object &o) : Parent(o) \
+    { if (m_ptr && !check_(m_ptr)) throw PYBIND11_OBJECT_CHECK_FAILED(Name, m_ptr); } \
+    Name(object &&o) : Parent(std::move(o)) \
+    { if (m_ptr && !check_(m_ptr)) throw PYBIND11_OBJECT_CHECK_FAILED(Name, m_ptr); }
 
 #define PYBIND11_OBJECT_DEFAULT(Name, Parent, CheckFun) \
     PYBIND11_OBJECT(Name, Parent, CheckFun) \
@@ -1229,10 +1236,22 @@ public:
     }
 
     template <typename T> operator T *() const {
+        return get_pointer<T>();
+    }
+
+    /// Get the pointer the capsule holds.
+    template<typename T = void>
+    T* get_pointer() const {
         auto name = this->name();
-        T * result = static_cast<T *>(PyCapsule_GetPointer(m_ptr, name));
+        T *result = static_cast<T *>(PyCapsule_GetPointer(m_ptr, name));
         if (!result) pybind11_fail("Unable to extract capsule contents!");
         return result;
+    }
+
+    /// Replaces a capsule's pointer *without* calling the destructor on the existing one.
+    void set_pointer(const void *value) {
+        if (PyCapsule_SetPointer(m_ptr, const_cast<void *>(value)) != 0)
+            pybind11_fail("Could not set capsule pointer");
     }
 
     const char *name() const { return PyCapsule_GetName(m_ptr); }
@@ -1252,6 +1271,15 @@ public:
     detail::tuple_iterator end() const { return {*this, PyTuple_GET_SIZE(m_ptr)}; }
 };
 
+// We need to put this into a separate function because the Intel compiler
+// fails to compile enable_if_t<all_of<is_keyword_or_ds<Args>...>::value> part below
+// (tested with ICC 2021.1 Beta 20200827).
+template <typename... Args>
+constexpr bool args_are_all_keyword_or_ds()
+{
+  return detail::all_of<detail::is_keyword_or_ds<Args>...>::value;
+}
+
 class dict : public object {
 public:
     PYBIND11_OBJECT_CVT(dict, object, PyDict_Check, raw_dict)
@@ -1259,7 +1287,7 @@ public:
         if (!m_ptr) pybind11_fail("Could not allocate dict object!");
     }
     template <typename... Args,
-              typename = detail::enable_if_t<detail::all_of<detail::is_keyword_or_ds<Args>...>::value>,
+              typename = detail::enable_if_t<args_are_all_keyword_or_ds<Args...>()>,
               // MSVC workaround: it can't compile an out-of-line definition, so defer the collector
               typename collector = detail::deferred_t<detail::unpacking_collector<>, Args...>>
     explicit dict(Args &&...args) : dict(collector(std::forward<Args>(args)...).kwargs()) { }
@@ -1511,13 +1539,17 @@ inline memoryview memoryview::from_buffer(
 
 /// \addtogroup python_builtins
 /// @{
+
+/// Get the length of a Python object.
 inline size_t len(handle h) {
     ssize_t result = PyObject_Length(h.ptr());
     if (result < 0)
-        pybind11_fail("Unable to compute length of object");
+        throw error_already_set();
     return (size_t) result;
 }
 
+/// Get the length hint of a Python object.
+/// Returns 0 when this cannot be determined.
 inline size_t len_hint(handle h) {
 #if PY_VERSION_HEX >= 0x03040000
     ssize_t result = PyObject_LengthHint(h.ptr(), 0);

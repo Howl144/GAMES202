@@ -1,5 +1,5 @@
 //========================================================================
-// GLFW 3.3 - www.glfw.org
+// GLFW 3.4 - www.glfw.org
 //------------------------------------------------------------------------
 // Copyright (c) 2002-2006 Marcus Geelnard
 // Copyright (c) 2006-2016 Camilla Löwy <elmindreda@glfw.org>
@@ -23,6 +23,8 @@
 // 3. This notice may not be removed or altered from any source
 //    distribution.
 //
+//========================================================================
+// Please use C89 style variable declarations in this file because VS 2010
 //========================================================================
 
 #include "internal.h"
@@ -194,15 +196,9 @@ const _GLFWfbconfig* _glfwChooseFBConfig(const _GLFWfbconfig* desired,
             continue;
         }
 
-        if (desired->doublebuffer != current->doublebuffer)
-        {
-            // Double buffering is a hard constraint
-            continue;
-        }
-
         if (desired->floatbuffer != current->floatbuffer)
         {
-            // Double buffering is a hard constraint
+            // Floating point buffer is a hard constraint
             continue;
         }
 
@@ -574,7 +570,9 @@ GLFWbool _glfwRefreshContextAttribs(_GLFWwindow* window,
         PFNGLCLEARPROC glClear = (PFNGLCLEARPROC)
             window->context.getProcAddress("glClear");
         glClear(GL_COLOR_BUFFER_BIT);
-        window->context.swapBuffers(window);
+
+        if (window->doublebuffer)
+            window->context.swapBuffers(window);
     }
 
     glfwMakeContextCurrent((GLFWwindow*) previous);

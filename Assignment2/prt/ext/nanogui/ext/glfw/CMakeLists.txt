@@ -1,6 +1,6 @@
-cmake_minimum_required (VERSION 3.13..3.18)
+cmake_minimum_required(VERSION 3.13...3.18 FATAL_ERROR)
 
-project(GLFW C)
+project(GLFW VERSION 3.4.0 LANGUAGES C)
 
 set(CMAKE_LEGACY_CYGWIN_WIN32 OFF)
 
@@ -8,47 +8,38 @@ if (POLICY CMP0054)
     cmake_policy(SET CMP0054 NEW)
 endif()
 
-if(POLICY CMP0022)
-  cmake_policy(SET CMP0022 NEW)
+if (POLICY CMP0069)
+    cmake_policy(SET CMP0069 NEW)
 endif()
 
-set(GLFW_VERSION_MAJOR "3")
-set(GLFW_VERSION_MINOR "3")
-set(GLFW_VERSION_PATCH "1")
-set(GLFW_VERSION_EXTRA "")
-set(GLFW_VERSION "${GLFW_VERSION_MAJOR}.${GLFW_VERSION_MINOR}")
-set(GLFW_VERSION_FULL "${GLFW_VERSION}.${GLFW_VERSION_PATCH}${GLFW_VERSION_EXTRA}")
+if (POLICY CMP0077)
+    cmake_policy(SET CMP0077 NEW)
+endif()
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
+if ("${CMAKE_SOURCE_DIR}" STREQUAL "${CMAKE_CURRENT_SOURCE_DIR}")
+    set(GLFW_STANDALONE TRUE)
+endif()
+
 option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
-option(GLFW_BUILD_EXAMPLES "Build the GLFW example programs" ON)
-option(GLFW_BUILD_TESTS "Build the GLFW test programs" ON)
+option(GLFW_BUILD_EXAMPLES "Build the GLFW example programs" ${GLFW_STANDALONE})
+option(GLFW_BUILD_TESTS "Build the GLFW test programs" ${GLFW_STANDALONE})
 option(GLFW_BUILD_DOCS "Build the GLFW documentation" ON)
 option(GLFW_INSTALL "Generate installation target" ON)
 option(GLFW_VULKAN_STATIC "Assume the Vulkan loader is linked with the application" OFF)
 
 include(GNUInstallDirs)
+include(CMakeDependentOption)
 
-if (UNIX)
-    option(GLFW_USE_OSMESA "Use OSMesa for offscreen context creation" OFF)
-endif()
-
-if (WIN32)
-    option(GLFW_USE_HYBRID_HPG "Force use of high-performance GPU on hybrid systems" OFF)
-endif()
-
-if (UNIX AND NOT APPLE)
-    option(GLFW_USE_WAYLAND "Use Wayland for window creation" OFF)
-endif()
-
-if (MSVC)
-    option(USE_MSVC_RUNTIME_LIBRARY_DLL "Use MSVC runtime library DLL" ON)
-endif()
-
-if (BUILD_SHARED_LIBS)
-    set(_GLFW_BUILD_DLL 1)
-endif()
+cmake_dependent_option(GLFW_USE_OSMESA "Use OSMesa for offscreen context creation" OFF
+                       "UNIX" OFF)
+cmake_dependent_option(GLFW_USE_HYBRID_HPG "Force use of high-performance GPU on hybrid systems" OFF
+                       "WIN32" OFF)
+cmake_dependent_option(GLFW_USE_WAYLAND "Use Wayland for window creation" OFF
+                       "UNIX;NOT APPLE" OFF)
+cmake_dependent_option(USE_MSVC_RUNTIME_LIBRARY_DLL "Use MSVC runtime library DLL" ON
+                       "MSVC" OFF)
 
 if (BUILD_SHARED_LIBS AND UNIX)
     # On Unix-like systems, shared libraries can use the soname system.
@@ -68,6 +59,8 @@ endif()
 
 list(APPEND CMAKE_MODULE_PATH "${GLFW_SOURCE_DIR}/CMake/modules")
 
+find_package(Threads REQUIRED)
+
 if (GLFW_BUILD_DOCS)
     set(DOXYGEN_SKIP_DOT TRUE)
     find_package(Doxygen)
@@ -76,19 +69,8 @@ endif()
 #--------------------------------------------------------------------
 # Set compiler specific flags
 #--------------------------------------------------------------------
-if (MSVC)
-    if (MSVC90)
-        # Workaround for VS 2008 not shipping with the DirectX 9 SDK
-        include(CheckIncludeFile)
-        check_include_file(dinput.h DINPUT_H_FOUND)
-        if (NOT DINPUT_H_FOUND)
-            message(FATAL_ERROR "DirectX 9 SDK not found")
-        endif()
-        # Workaround for VS 2008 not shipping with stdint.h
-        list(APPEND glfw_INCLUDE_DIRS "${GLFW_SOURCE_DIR}/deps/vs2008")
-    endif()
-
-    if (NOT USE_MSVC_RUNTIME_LIBRARY_DLL)
+if (MSVC AND NOT USE_MSVC_RUNTIME_LIBRARY_DLL)
+    if (${CMAKE_VERSION} VERSION_LESS 3.15)
         foreach (flag CMAKE_C_FLAGS
                       CMAKE_C_FLAGS_DEBUG
                       CMAKE_C_FLAGS_RELEASE
@@ -103,41 +85,8 @@ if (MSVC)
             endif()
 
         endforeach()
-    endif()
-endif()
-
-if (MINGW)
-    # Workaround for legacy MinGW not providing XInput and DirectInput
-    include(CheckIncludeFile)
-
-    check_include_file(dinput.h DINPUT_H_FOUND)
-    check_include_file(xinput.h XINPUT_H_FOUND)
-    if (NOT DINPUT_H_FOUND OR NOT XINPUT_H_FOUND)
-        list(APPEND glfw_INCLUDE_DIRS "${GLFW_SOURCE_DIR}/deps/mingw")
-    endif()
-
-    # Enable link-time exploit mitigation features enabled by default on MSVC
-    include(CheckCCompilerFlag)
-
-    # Compatibility with data execution prevention (DEP)
-    set(CMAKE_REQUIRED_FLAGS "-Wl,--nxcompat")
-    check_c_compiler_flag("" _GLFW_HAS_DEP)
-    if (_GLFW_HAS_DEP)
-        set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--nxcompat ${CMAKE_SHARED_LINKER_FLAGS}")
-    endif()
-
-    # Compatibility with address space layout randomization (ASLR)
-    set(CMAKE_REQUIRED_FLAGS "-Wl,--dynamicbase")
-    check_c_compiler_flag("" _GLFW_HAS_ASLR)
-    if (_GLFW_HAS_ASLR)
-        set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--dynamicbase ${CMAKE_SHARED_LINKER_FLAGS}")
-    endif()
-
-    # Compatibility with 64-bit address space layout randomization (ASLR)
-    set(CMAKE_REQUIRED_FLAGS "-Wl,--high-entropy-va")
-    check_c_compiler_flag("" _GLFW_HAS_64ASLR)
-    if (_GLFW_HAS_64ASLR)
-        set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--high-entropy-va ${CMAKE_SHARED_LINKER_FLAGS}")
+    else()
+        set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     endif()
 endif()
 
@@ -206,56 +155,56 @@ if (_GLFW_X11)
 
     find_package(X11 REQUIRED)
 
-    list(APPEND glfw_PKG_DEPS "x11")
-
     # Set up library and include paths
     list(APPEND glfw_INCLUDE_DIRS "${X11_X11_INCLUDE_PATH}")
-    list(APPEND glfw_LIBRARIES "${X11_X11_LIB}" "${CMAKE_THREAD_LIBS_INIT}")
 
     # Check for XRandR (modern resolution switching and gamma control)
-    if (NOT X11_Xrandr_FOUND)
-        message(FATAL_ERROR "The RandR headers were not found")
+    if (NOT X11_Xrandr_INCLUDE_PATH)
+        message(FATAL_ERROR "RandR headers not found; install libxrandr development package")
     endif()
 
     # Check for Xinerama (legacy multi-monitor support)
-    if (NOT X11_Xinerama_FOUND)
-        message(FATAL_ERROR "The Xinerama headers were not found")
+    if (NOT X11_Xinerama_INCLUDE_PATH)
+        message(FATAL_ERROR "Xinerama headers not found; install libxinerama development package")
     endif()
 
     # Check for Xkb (X keyboard extension)
-    if (NOT X11_Xkb_FOUND)
-        message(FATAL_ERROR "The X keyboard extension headers were not found")
+    if (NOT X11_Xkb_INCLUDE_PATH)
+        message(FATAL_ERROR "XKB headers not found; install X11 development package")
     endif()
 
     # Check for Xcursor (cursor creation from RGBA images)
-    if (NOT X11_Xcursor_FOUND)
-        message(FATAL_ERROR "The Xcursor headers were not found")
+    if (NOT X11_Xcursor_INCLUDE_PATH)
+        message(FATAL_ERROR "Xcursor headers not found; install libxcursor development package")
     endif()
 
-    list(APPEND glfw_INCLUDE_DIRS "${X11_Xrandr_INCLUDE_PATH}"
-                                  "${X11_Xinerama_INCLUDE_PATH}"
-                                  "${X11_Xkb_INCLUDE_PATH}"
-                                  "${X11_Xcursor_INCLUDE_PATH}")
+    # Check for XInput (modern HID input)
+    if (NOT X11_Xi_INCLUDE_PATH)
+        message(FATAL_ERROR "XInput headers not found; install libxi development package")
+    endif()
+
+    # Check for X Shape (custom window input shape)
+    if (NOT X11_Xshape_INCLUDE_PATH)
+        message(FATAL_ERROR "X Shape headers not found; install libxext development package")
+    endif()
 endif()
 
 #--------------------------------------------------------------------
 # Use Wayland for window creation
 #--------------------------------------------------------------------
 if (_GLFW_WAYLAND)
-    find_package(ECM REQUIRED NO_MODULE)
-    list(APPEND CMAKE_MODULE_PATH "${ECM_MODULE_PATH}")
 
-    find_package(Wayland REQUIRED Client Cursor Egl)
-    find_package(WaylandScanner REQUIRED)
-    find_package(WaylandProtocols 1.15 REQUIRED)
+    include(FindPkgConfig)
+    pkg_check_modules(Wayland REQUIRED
+        wayland-client>=0.2.7
+        wayland-cursor>=0.2.7
+        wayland-egl>=0.2.7
+        xkbcommon)
 
-    list(APPEND glfw_PKG_DEPS "wayland-egl")
+    list(APPEND glfw_PKG_DEPS "wayland-client")
 
     list(APPEND glfw_INCLUDE_DIRS "${Wayland_INCLUDE_DIRS}")
-    list(APPEND glfw_LIBRARIES "${Wayland_LIBRARIES}" "${CMAKE_THREAD_LIBS_INIT}")
-
-    find_package(XKBCommon REQUIRED)
-    list(APPEND glfw_INCLUDE_DIRS "${XKBCOMMON_INCLUDE_DIRS}")
+    list(APPEND glfw_LIBRARIES "${Wayland_LINK_LIBRARIES}")
 
     include(CheckIncludeFiles)
     include(CheckFunctionExists)
@@ -272,14 +221,6 @@ if (_GLFW_WAYLAND)
 endif()
 
 #--------------------------------------------------------------------
-# Use OSMesa for offscreen context creation
-#--------------------------------------------------------------------
-if (_GLFW_OSMESA)
-    find_package(OSMesa REQUIRED)
-    list(APPEND glfw_LIBRARIES "${CMAKE_THREAD_LIBS_INIT}")
-endif()
-
-#--------------------------------------------------------------------
 # Use Cocoa for window creation and NSOpenGL for context creation
 #--------------------------------------------------------------------
 if (_GLFW_COCOA)
@@ -287,11 +228,10 @@ if (_GLFW_COCOA)
     list(APPEND glfw_LIBRARIES
         "-framework Cocoa"
         "-framework IOKit"
-        "-framework CoreFoundation"
-        "-framework CoreVideo")
+        "-framework CoreFoundation")
 
     set(glfw_PKG_DEPS "")
-    set(glfw_PKG_LIBS "-framework Cocoa -framework IOKit -framework CoreFoundation -framework CoreVideo")
+    set(glfw_PKG_LIBS "-framework Cocoa -framework IOKit -framework CoreFoundation")
 endif()
 
 #--------------------------------------------------------------------
@@ -318,18 +258,16 @@ include(CMakePackageConfigHelpers)
 
 set(GLFW_CONFIG_PATH "${CMAKE_INSTALL_LIBDIR}/cmake/glfw3")
 
-configure_package_config_file(src/glfw3Config.cmake.in
+configure_package_config_file(CMake/glfw3Config.cmake.in
                               src/glfw3Config.cmake
                               INSTALL_DESTINATION "${GLFW_CONFIG_PATH}"
                               NO_CHECK_REQUIRED_COMPONENTS_MACRO)
 
 write_basic_package_version_file(src/glfw3ConfigVersion.cmake
-                                 VERSION ${GLFW_VERSION_FULL}
+                                 VERSION ${GLFW_VERSION}
                                  COMPATIBILITY SameMajorVersion)
 
-configure_file(src/glfw_config.h.in src/glfw_config.h @ONLY)
-
-configure_file(src/glfw3.pc.in src/glfw3.pc @ONLY)
+configure_file(CMake/glfw3.pc.in src/glfw3.pc @ONLY)
 
 #--------------------------------------------------------------------
 # Add subdirectories
@@ -366,9 +304,14 @@ if (GLFW_INSTALL)
     install(FILES "${GLFW_BINARY_DIR}/src/glfw3.pc"
             DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig")
 
+    if (DOXYGEN_FOUND AND GLFW_BUILD_DOCS)
+        install(DIRECTORY "${GLFW_BINARY_DIR}/docs/html"
+                DESTINATION "${CMAKE_INSTALL_DOCDIR}")
+    endif()
+
     # Only generate this target if no higher-level project already has
     if (NOT TARGET uninstall)
-        configure_file(cmake_uninstall.cmake.in
+        configure_file(CMake/cmake_uninstall.cmake.in
                        cmake_uninstall.cmake IMMEDIATE @ONLY)
 
         add_custom_target(uninstall

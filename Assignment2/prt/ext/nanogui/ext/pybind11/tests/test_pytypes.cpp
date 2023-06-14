@@ -108,7 +108,7 @@ TEST_SUBMODULE(pytypes, m) {
     });
 
     m.def("return_capsule_with_name_and_destructor", []() {
-        auto capsule = py::capsule((void *) 1234, "pointer type description", [](PyObject *ptr) {
+        auto capsule = py::capsule((void *) 12345, "pointer type description", [](PyObject *ptr) {
             if (ptr) {
                 auto name = PyCapsule_GetName(ptr);
                 py::print("destructing capsule ({}, '{}')"_s.format(
@@ -116,8 +116,19 @@ TEST_SUBMODULE(pytypes, m) {
                 ));
             }
         });
-        void *contents = capsule;
-        py::print("created capsule ({}, '{}')"_s.format((size_t) contents, capsule.name()));
+
+        capsule.set_pointer((void *) 1234);
+
+        // Using get_pointer<T>()
+        void* contents1 = static_cast<void*>(capsule);
+        void* contents2 = capsule.get_pointer();
+        void* contents3 = capsule.get_pointer<void>();
+
+        auto result1 = reinterpret_cast<size_t>(contents1);
+        auto result2 = reinterpret_cast<size_t>(contents2);
+        auto result3 = reinterpret_cast<size_t>(contents3);
+
+        py::print("created capsule ({}, '{}')"_s.format(result1 & result2 & result3, capsule.name()));
         return capsule;
     });
 
@@ -128,7 +139,7 @@ TEST_SUBMODULE(pytypes, m) {
         d["basic_attr"] = o.attr("basic_attr");
 
         auto l = py::list();
-        for (const auto &item : o.attr("begin_end")) {
+        for (auto item : o.attr("begin_end")) {
             l.append(item);
         }
         d["begin_end"] = l;
@@ -243,6 +254,22 @@ TEST_SUBMODULE(pytypes, m) {
 
     m.def("convert_to_pybind11_str", [](py::object o) { return py::str(o); });
 
+    m.def("nonconverting_constructor", [](std::string type, py::object value, bool move) -> py::object {
+        if (type == "bytes") {
+            return move ? py::bytes(std::move(value)) : py::bytes(value);
+        }
+        else if (type == "none") {
+            return move ? py::none(std::move(value)) : py::none(value);
+        }
+        else if (type == "ellipsis") {
+            return move ? py::ellipsis(std::move(value)) : py::ellipsis(value);
+        }
+        else if (type == "type") {
+            return move ? py::type(std::move(value)) : py::type(value);
+        }
+        throw std::runtime_error("Invalid type");
+    });
+
     m.def("get_implicit_casting", []() {
         py::dict d;
         d["char*_i1"] = "abc";
@@ -289,7 +316,7 @@ TEST_SUBMODULE(pytypes, m) {
         py::print("no new line here", "end"_a=" -- ");
         py::print("next print");
 
-        auto py_stderr = py::module::import("sys").attr("stderr");
+        auto py_stderr = py::module_::import("sys").attr("stderr");
         py::print("this goes to stderr", "file"_a=py_stderr);
 
         py::print("flush", "flush"_a=true);
@@ -380,7 +407,10 @@ TEST_SUBMODULE(pytypes, m) {
     m.def("test_memoryview_from_memory", []() {
         const char* buf = "\xff\xe1\xab\x37";
         return py::memoryview::from_memory(
-            buf, static_cast<ssize_t>(strlen(buf)));
+            buf, static_cast<py::ssize_t>(strlen(buf)));
     });
 #endif
+
+    // test_builtin_functions
+    m.def("get_len", [](py::handle h) { return py::len(h); });
 }

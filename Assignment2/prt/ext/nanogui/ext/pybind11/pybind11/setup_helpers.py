@@ -33,12 +33,19 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
 
+# IMPORTANT: If you change this file in the pybind11 repo, also review
+# setup_helpers.pyi for matching changes.
+#
+# If you copy this file in, you don't
+# need the .pyi file; it's just an interface file for static type checkers.
+
 import contextlib
 import os
 import shutil
 import sys
 import tempfile
 import threading
+import platform
 import warnings
 
 try:
@@ -49,6 +56,7 @@ except ImportError:
     from distutils.extension import Extension as _Extension
 
 import distutils.errors
+import distutils.ccompiler
 
 
 WIN = sys.platform.startswith("win32")
@@ -91,15 +99,14 @@ class Pybind11Extension(_Extension):
     this is an ugly old-style class due to Distutils.
     """
 
-    def _add_cflags(self, *flags):
-        for flag in flags:
-            if flag not in self.extra_compile_args:
-                self.extra_compile_args.append(flag)
+    # flags are prepended, so that they can be further overridden, e.g. by
+    # ``extra_compile_args=["-g"]``.
 
-    def _add_lflags(self, *flags):
-        for flag in flags:
-            if flag not in self.extra_compile_args:
-                self.extra_link_args.append(flag)
+    def _add_cflags(self, flags):
+        self.extra_compile_args[:0] = flags
+
+    def _add_ldflags(self, flags):
+        self.extra_link_args[:0] = flags
 
     def __init__(self, *args, **kwargs):
 
@@ -131,13 +138,17 @@ class Pybind11Extension(_Extension):
         # Have to use the accessor manually to support Python 2 distutils
         Pybind11Extension.cxx_std.__set__(self, cxx_std)
 
+        cflags = []
+        ldflags = []
         if WIN:
-            self._add_cflags("/EHsc", "/bigobj")
+            cflags += ["/EHsc", "/bigobj"]
         else:
-            self._add_cflags("-fvisibility=hidden", "-g0")
+            cflags += ["-fvisibility=hidden", "-g0"]
             if MACOS:
-                self._add_cflags("-stdlib=libc++")
-                self._add_lflags("-stdlib=libc++")
+                cflags += ["-stdlib=libc++"]
+                ldflags += ["-stdlib=libc++"]
+        self._add_cflags(cflags)
+        self._add_ldflags(ldflags)
 
     @property
     def cxx_std(self):
@@ -156,7 +167,8 @@ class Pybind11Extension(_Extension):
         if self._cxx_level:
             warnings.warn("You cannot safely change the cxx_level after setting it!")
 
-        # MSVC 2015 Update 3 and later only have 14 (and later 17) modes
+        # MSVC 2015 Update 3 and later only have 14 (and later 17) modes, so
+        # force a valid flag here.
         if WIN and level == 11:
             level = 14
 
@@ -165,19 +177,34 @@ class Pybind11Extension(_Extension):
         if not level:
             return
 
-        self.extra_compile_args.append(STD_TMPL.format(level))
+        cflags = [STD_TMPL.format(level)]
+        ldflags = []
 
         if MACOS and "MACOSX_DEPLOYMENT_TARGET" not in os.environ:
-            # C++17 requires a higher min version of macOS
-            macosx_min = "-mmacosx-version-min=" + ("10.9" if level < 17 else "10.14")
-            self.extra_compile_args.append(macosx_min)
-            self.extra_link_args.append(macosx_min)
+            # C++17 requires a higher min version of macOS. An earlier version
+            # (10.12 or 10.13) can be set manually via environment variable if
+            # you are careful in your feature usage, but 10.14 is the safest
+            # setting for general use. However, never set higher than the
+            # current macOS version!
+            current_macos = tuple(int(x) for x in platform.mac_ver()[0].split(".")[:2])
+            desired_macos = (10, 9) if level < 17 else (10, 14)
+            macos_string = ".".join(str(x) for x in min(current_macos, desired_macos))
+            macosx_min = "-mmacosx-version-min=" + macos_string
+            cflags += [macosx_min]
+            ldflags += [macosx_min]
 
         if PY2:
-            if level >= 17:
-                self.extra_compile_args.append("/wd503" if WIN else "-Wno-register")
-            elif not WIN and level >= 14:
-                self.extra_compile_args.append("-Wno-deprecated-register")
+            if WIN:
+                # Will be ignored on MSVC 2015, where C++17 is not supported so
+                # this flag is not valid.
+                cflags += ["/wd5033"]
+            elif level >= 17:
+                cflags += ["-Wno-register"]
+            elif level >= 14:
+                cflags += ["-Wno-deprecated-register"]
+
+        self._add_cflags(cflags)
+        self._add_ldflags(ldflags)
 
 
 # Just in case someone clever tries to multithread
@@ -212,7 +239,8 @@ def has_flag(compiler, flag):
     with tmp_chdir():
         fname = "flagcheck.cpp"
         with open(fname, "w") as f:
-            f.write("int main (int argc, char **argv) { return 0; }")
+            # Don't trigger -Wunused-parameter.
+            f.write("int main (int, char **) { return 0; }")
 
         try:
             compiler.compile([fname], extra_postargs=[flag])
@@ -227,8 +255,11 @@ cpp_flag_cache = None
 
 def auto_cpp_level(compiler):
     """
-    Return the max supported C++ std level (17, 14, or 11).
+    Return the max supported C++ std level (17, 14, or 11). Returns latest on Windows.
     """
+
+    if WIN:
+        return "latest"
 
     global cpp_flag_cache
 
@@ -237,7 +268,7 @@ def auto_cpp_level(compiler):
         if cpp_flag_cache:
             return cpp_flag_cache
 
-    levels = [17, 14] + ([] if WIN else [11])
+    levels = [17, 14, 11]
 
     for level in levels:
         if has_flag(compiler, STD_TMPL.format(level)):
@@ -252,7 +283,8 @@ def auto_cpp_level(compiler):
 class build_ext(_build_ext):  # noqa: N801
     """
     Customized build_ext that allows an auto-search for the highest supported
-    C++ level for Pybind11Extension.
+    C++ level for Pybind11Extension. This is only needed for the auto-search
+    for now, and is completely optional otherwise.
     """
 
     def build_extensions(self):
@@ -268,3 +300,145 @@ class build_ext(_build_ext):  # noqa: N801
         # Python 2 doesn't allow super here, since distutils uses old-style
         # classes!
         _build_ext.build_extensions(self)
+
+
+def naive_recompile(obj, src):
+    """
+    This will recompile only if the source file changes. It does not check
+    header files, so a more advanced function or Ccache is better if you have
+    editable header files in your package.
+    """
+    return os.stat(obj).st_mtime < os.stat(src).st_mtime
+
+
+def no_recompile(obg, src):
+    """
+    This is the safest but slowest choice (and is the default) - will always
+    recompile sources.
+    """
+    return True
+
+
+# Optional parallel compile utility
+# inspired by: http://stackoverflow.com/questions/11013851/speeding-up-build-process-with-distutils
+# and: https://github.com/tbenthompson/cppimport/blob/stable/cppimport/build_module.py
+# and NumPy's parallel distutils module:
+#              https://github.com/numpy/numpy/blob/master/numpy/distutils/ccompiler.py
+class ParallelCompile(object):
+    """
+    Make a parallel compile function. Inspired by
+    numpy.distutils.ccompiler.CCompiler_compile and cppimport.
+
+    This takes several arguments that allow you to customize the compile
+    function created:
+
+    envvar:
+        Set an environment variable to control the compilation threads, like
+        NPY_NUM_BUILD_JOBS
+    default:
+        0 will automatically multithread, or 1 will only multithread if the
+        envvar is set.
+    max:
+        The limit for automatic multithreading if non-zero
+    needs_recompile:
+        A function of (obj, src) that returns True when recompile is needed.  No
+        effect in isolated mode; use ccache instead, see
+        https://github.com/matplotlib/matplotlib/issues/1507/
+
+    To use::
+
+        ParallelCompile("NPY_NUM_BUILD_JOBS").install()
+
+    or::
+
+        with ParallelCompile("NPY_NUM_BUILD_JOBS"):
+            setup(...)
+
+    By default, this assumes all files need to be recompiled. A smarter
+    function can be provided via needs_recompile.  If the output has not yet
+    been generated, the compile will always run, and this function is not
+    called.
+    """
+
+    __slots__ = ("envvar", "default", "max", "_old", "needs_recompile")
+
+    def __init__(self, envvar=None, default=0, max=0, needs_recompile=no_recompile):
+        self.envvar = envvar
+        self.default = default
+        self.max = max
+        self.needs_recompile = needs_recompile
+        self._old = []
+
+    def function(self):
+        """
+        Builds a function object usable as distutils.ccompiler.CCompiler.compile.
+        """
+
+        def compile_function(
+            compiler,
+            sources,
+            output_dir=None,
+            macros=None,
+            include_dirs=None,
+            debug=0,
+            extra_preargs=None,
+            extra_postargs=None,
+            depends=None,
+        ):
+
+            # These lines are directly from distutils.ccompiler.CCompiler
+            macros, objects, extra_postargs, pp_opts, build = compiler._setup_compile(
+                output_dir, macros, include_dirs, sources, depends, extra_postargs
+            )
+            cc_args = compiler._get_cc_args(pp_opts, debug, extra_preargs)
+
+            # The number of threads; start with default.
+            threads = self.default
+
+            # Determine the number of compilation threads, unless set by an environment variable.
+            if self.envvar is not None:
+                threads = int(os.environ.get(self.envvar, self.default))
+
+            def _single_compile(obj):
+                try:
+                    src, ext = build[obj]
+                except KeyError:
+                    return
+
+                if not os.path.exists(obj) or self.needs_recompile(obj, src):
+                    compiler._compile(obj, src, ext, cc_args, extra_postargs, pp_opts)
+
+            try:
+                import multiprocessing
+                from multiprocessing.pool import ThreadPool
+            except ImportError:
+                threads = 1
+
+            if threads == 0:
+                try:
+                    threads = multiprocessing.cpu_count()
+                    threads = self.max if self.max and self.max < threads else threads
+                except NotImplementedError:
+                    threads = 1
+
+            if threads > 1:
+                for _ in ThreadPool(threads).imap_unordered(_single_compile, objects):
+                    pass
+            else:
+                for ob in objects:
+                    _single_compile(ob)
+
+            return objects
+
+        return compile_function
+
+    def install(self):
+        distutils.ccompiler.CCompiler.compile = self.function()
+        return self
+
+    def __enter__(self):
+        self._old.append(distutils.ccompiler.CCompiler.compile)
+        return self.install()
+
+    def __exit__(self, *args):
+        distutils.ccompiler.CCompiler.compile = self._old.pop()

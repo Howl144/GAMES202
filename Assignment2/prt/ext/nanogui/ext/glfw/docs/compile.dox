@@ -103,14 +103,13 @@ To compile GLFW for Wayland, you need to have the Wayland packages installed,
 as well as the basic development tools like GCC and make.  For example, on
 Ubuntu and other distributions based on Debian GNU/Linux, you need to install
 the `libwayland-dev` package, which contains all Wayland headers and pulls in
-wayland-scanner, as well as the `wayland-protocols` and `extra-cmake-modules`
-packages.
+wayland-scanner, as well as the `wayland-protocols` package.
 
 Once you have installed the necessary packages, move on to @ref
 compile_generate.
 
 
-@subsection compile_deps_osmesa Dependencies for Linux and OSMesa
+@subsubsection compile_deps_osmesa Dependencies for Linux and OSMesa
 
 To compile GLFW for OSMesa, you need to install the OSMesa library and header
 packages.  For example, on Ubuntu and other distributions based on Debian
@@ -212,11 +211,13 @@ library or as a DLL / shared library / dynamic library.
 
 @anchor GLFW_BUILD_EXAMPLES
 __GLFW_BUILD_EXAMPLES__ determines whether the GLFW examples are built
-along with the library.
+along with the library.  This is enabled by default unless GLFW is being built
+as a sub-project.
 
 @anchor GLFW_BUILD_TESTS
 __GLFW_BUILD_TESTS__ determines whether the GLFW test programs are
-built along with the library.
+built along with the library.  This is enabled by default unless GLFW is being
+built as a sub-project.
 
 @anchor GLFW_BUILD_DOCS
 __GLFW_BUILD_DOCS__ determines whether the GLFW documentation is built along
@@ -233,6 +234,10 @@ directly with the application.
 __USE_MSVC_RUNTIME_LIBRARY_DLL__ determines whether to use the DLL version or the
 static library version of the Visual C++ runtime library.  If set to `ON`, the
 DLL version of the Visual C++ library is used.
+
+@note On CMake 3.15 and later you can set the
+[CMAKE_MSVC_RUNTIME_LIBRARY](https://cmake.org/cmake/help/latest/variable/CMAKE_MSVC_RUNTIME_LIBRARY.html)
+variable instead of this option.
 
 @anchor GLFW_USE_HYBRID_HPG
 __GLFW_USE_HYBRID_HPG__ determines whether to export the `NvOptimusEnablement` and

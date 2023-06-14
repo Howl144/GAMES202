@@ -20,6 +20,7 @@
 #include <sstream>
 #include <string>
 #include <functional>
+#include <type_traits>
 #include <utility>
 #include <vector>
 #include <typeindex>
@@ -33,7 +34,9 @@
    whole npy_intp / ssize_t / Py_intptr_t business down to just ssize_t for all size
    and dimension types (e.g. shape, strides, indexing), instead of inflicting this
    upon the library user. */
-static_assert(sizeof(ssize_t) == sizeof(Py_intptr_t), "ssize_t != Py_intptr_t");
+static_assert(sizeof(::pybind11::ssize_t) == sizeof(Py_intptr_t), "ssize_t != Py_intptr_t");
+static_assert(std::is_signed<Py_intptr_t>::value, "Py_intptr_t must be signed");
+// We now can reinterpret_cast between py::ssize_t and Py_intptr_t (MSVC + PyPy cares)
 
 PYBIND11_NAMESPACE_BEGIN(PYBIND11_NAMESPACE)
 
@@ -222,7 +225,7 @@ private:
     };
 
     static npy_api lookup() {
-        module_ m = module::import("numpy.core.multiarray");
+        module_ m = module_::import("numpy.core.multiarray");
         auto c = m.attr("_ARRAY_API");
 #if PY_MAJOR_VERSION >= 3
         void **api_ptr = (void **) PyCapsule_GetPointer(c.ptr(), NULL);
@@ -328,6 +331,12 @@ template <typename T> using is_pod_struct = all_of<
     satisfies_none_of<T, std::is_reference, std::is_array, is_std_array, std::is_arithmetic, is_complex, std::is_enum>
 >;
 
+// Replacement for std::is_pod (deprecated in C++20)
+template <typename T> using is_pod = all_of<
+    std::is_standard_layout<T>,
+    std::is_trivial<T>
+>;
+
 template <ssize_t Dim = 0, typename Strides> ssize_t byte_offset_unsafe(const Strides &) { return 0; }
 template <ssize_t Dim = 0, typename Strides, typename... Ix>
 ssize_t byte_offset_unsafe(const Strides &strides, ssize_t i, Ix... index) {
@@ -419,6 +428,10 @@ class unchecked_mutable_reference : public unchecked_reference<T, Dims> {
     using ConstBase::ConstBase;
     using ConstBase::Dynamic;
 public:
+    // Bring in const-qualified versions from base class
+    using ConstBase::operator();
+    using ConstBase::operator[];
+
     /// Mutable, unchecked access to data at the given indices.
     template <typename... Ix> T& operator()(Ix... index) {
         static_assert(ssize_t{sizeof...(Ix)} == Dims || Dynamic,
@@ -501,7 +514,7 @@ public:
 
 private:
     static object _dtype_from_pep3118() {
-        static PyObject *obj = module::import("numpy.core._internal")
+        static PyObject *obj = module_::import("numpy.core._internal")
             .attr("_dtype_from_pep3118").cast<object>().release().ptr();
         return reinterpret_borrow<object>(obj);
     }
@@ -560,7 +573,7 @@ public:
           const void *ptr = nullptr, handle base = handle()) {
 
         if (strides->empty())
-            *strides = c_strides(*shape, dt.itemsize());
+            *strides = detail::c_strides(*shape, dt.itemsize());
 
         auto ndim = shape->size();
         if (ndim != strides->size())
@@ -579,7 +592,10 @@ public:
 
         auto &api = detail::npy_api::get();
         auto tmp = reinterpret_steal<object>(api.PyArray_NewFromDescr_(
-            api.PyArray_Type_, descr.release().ptr(), (int) ndim, shape->data(), strides->data(),
+            api.PyArray_Type_, descr.release().ptr(), (int) ndim,
+            // Use reinterpret_cast for PyPy on Windows (remove if fixed, checked on 7.3.1)
+            reinterpret_cast<Py_intptr_t*>(shape->data()),
+            reinterpret_cast<Py_intptr_t*>(strides->data()),
             const_cast<void *>(ptr), flags, nullptr));
         if (!tmp)
             throw error_already_set();
@@ -751,10 +767,12 @@ public:
     /// then resize will succeed only if it makes a reshape, i.e. original size doesn't change
     void resize(ShapeContainer new_shape, bool refcheck = true) {
         detail::npy_api::PyArray_Dims d = {
-            new_shape->data(), int(new_shape->size())
+            // Use reinterpret_cast for PyPy on Windows (remove if fixed, checked on 7.3.1)
+            reinterpret_cast<Py_intptr_t*>(new_shape->data()),
+            int(new_shape->size())
         };
         // try to resize, set ordering param to -1 cause it's not used anyway
-        object new_array = reinterpret_steal<object>(
+        auto new_array = reinterpret_steal<object>(
             detail::npy_api::get().PyArray_Resize_(m_ptr, &d, int(refcheck), -1)
         );
         if (!new_array) throw error_already_set();
@@ -786,25 +804,6 @@ protected:
     void check_writeable() const {
         if (!writeable())
             throw std::domain_error("array is not writeable");
-    }
-
-    // Default, C-style strides
-    static std::vector<ssize_t> c_strides(const std::vector<ssize_t> &shape, ssize_t itemsize) {
-        auto ndim = shape.size();
-        std::vector<ssize_t> strides(ndim, itemsize);
-        if (ndim > 0)
-            for (size_t i = ndim - 1; i > 0; --i)
-                strides[i - 1] = strides[i] * shape[i];
-        return strides;
-    }
-
-    // F-style strides; default when constructing an array_t with `ExtraFlags & f_style`
-    static std::vector<ssize_t> f_strides(const std::vector<ssize_t> &shape, ssize_t itemsize) {
-        auto ndim = shape.size();
-        std::vector<ssize_t> strides(ndim, itemsize);
-        for (size_t i = 1; i < ndim; ++i)
-            strides[i] = strides[i - 1] * shape[i - 1];
-        return strides;
     }
 
     template<typename... Ix> void check_dimensions(Ix... index) const {
@@ -865,7 +864,9 @@ public:
 
     explicit array_t(ShapeContainer shape, const T *ptr = nullptr, handle base = handle())
         : array_t(private_ctor{}, std::move(shape),
-                ExtraFlags & f_style ? f_strides(*shape, itemsize()) : c_strides(*shape, itemsize()),
+                ExtraFlags & f_style
+                ? detail::f_strides(*shape, itemsize())
+                : detail::c_strides(*shape, itemsize()),
                 ptr, base) { }
 
     explicit array_t(ssize_t count, const T *ptr = nullptr, handle base = handle())
@@ -1270,19 +1271,6 @@ private:
 
 #endif // __CLION_IDE__
 
-template  <class T>
-using array_iterator = typename std::add_pointer<T>::type;
-
-template <class T>
-array_iterator<T> array_begin(const buffer_info& buffer) {
-    return array_iterator<T>(reinterpret_cast<T*>(buffer.ptr));
-}
-
-template <class T>
-array_iterator<T> array_end(const buffer_info& buffer) {
-    return array_iterator<T>(reinterpret_cast<T*>(buffer.ptr) + buffer.size);
-}
-
 class common_iterator {
 public:
     using container_type = std::vector<ssize_t>;
@@ -1474,13 +1462,63 @@ struct vectorize_arg {
     using call_type = remove_reference_t<T>;
     // Is this a vectorized argument?
     static constexpr bool vectorize =
-        satisfies_any_of<call_type, std::is_arithmetic, is_complex, std::is_pod>::value &&
+        satisfies_any_of<call_type, std::is_arithmetic, is_complex, is_pod>::value &&
         satisfies_none_of<call_type, std::is_pointer, std::is_array, is_std_array, std::is_enum>::value &&
         (!std::is_reference<T>::value ||
          (std::is_lvalue_reference<T>::value && std::is_const<call_type>::value));
     // Accept this type: an array for vectorized types, otherwise the type as-is:
     using type = conditional_t<vectorize, array_t<remove_cv_t<call_type>, array::forcecast>, T>;
 };
+
+
+// py::vectorize when a return type is present
+template <typename Func, typename Return, typename... Args>
+struct vectorize_returned_array {
+    using Type = array_t<Return>;
+
+    static Type create(broadcast_trivial trivial, const std::vector<ssize_t> &shape) {
+        if (trivial == broadcast_trivial::f_trivial)
+            return array_t<Return, array::f_style>(shape);
+        else
+            return array_t<Return>(shape);
+    }
+
+    static Return *mutable_data(Type &array) {
+        return array.mutable_data();
+    }
+
+    static Return call(Func &f, Args &... args) {
+        return f(args...);
+    }
+
+    static void call(Return *out, size_t i, Func &f, Args &... args) {
+        out[i] = f(args...);
+    }
+};
+
+// py::vectorize when a return type is not present
+template <typename Func, typename... Args>
+struct vectorize_returned_array<Func, void, Args...> {
+    using Type = none;
+
+    static Type create(broadcast_trivial, const std::vector<ssize_t> &) {
+        return none();
+    }
+
+    static void *mutable_data(Type &) {
+        return nullptr;
+    }
+
+    static detail::void_type call(Func &f, Args &... args) {
+        f(args...);
+        return {};
+    }
+
+    static void call(void *, size_t, Func &f, Args &... args) {
+        f(args...);
+    }
+};
+
 
 template <typename Func, typename Return, typename... Args>
 struct vectorize_helper {
@@ -1516,6 +1554,8 @@ private:
     using arg_call_types = std::tuple<typename vectorize_arg<Args>::call_type...>;
     template <size_t Index> using param_n_t = typename std::tuple_element<Index, arg_call_types>::type;
 
+    using returned_array = vectorize_returned_array<Func, Return, Args...>;
+
     // Runs a vectorized function given arguments tuple and three index sequences:
     //     - Index is the full set of 0 ... (N-1) argument indices;
     //     - VIndex is the subset of argument indices with vectorized parameters, letting us access
@@ -1547,20 +1587,19 @@ private:
         // not wrapped in an array).
         if (size == 1 && ndim == 0) {
             PYBIND11_EXPAND_SIDE_EFFECTS(params[VIndex] = buffers[BIndex].ptr);
-            return cast(f(*reinterpret_cast<param_n_t<Index> *>(params[Index])...));
+            return cast(returned_array::call(f, *reinterpret_cast<param_n_t<Index> *>(params[Index])...));
         }
 
-        array_t<Return> result;
-        if (trivial == broadcast_trivial::f_trivial) result = array_t<Return, array::f_style>(shape);
-        else result = array_t<Return>(shape);
+        auto result = returned_array::create(trivial, shape);
 
         if (size == 0) return std::move(result);
 
         /* Call the function */
+        auto mutable_data = returned_array::mutable_data(result);
         if (trivial == broadcast_trivial::non_trivial)
-            apply_broadcast(buffers, params, result, i_seq, vi_seq, bi_seq);
+            apply_broadcast(buffers, params, mutable_data, size, shape, i_seq, vi_seq, bi_seq);
         else
-            apply_trivial(buffers, params, result.mutable_data(), size, i_seq, vi_seq, bi_seq);
+            apply_trivial(buffers, params, mutable_data, size, i_seq, vi_seq, bi_seq);
 
         return std::move(result);
     }
@@ -1583,7 +1622,7 @@ private:
         }};
 
         for (size_t i = 0; i < size; ++i) {
-            out[i] = f(*reinterpret_cast<param_n_t<Index> *>(params[Index])...);
+            returned_array::call(out, i, f, *reinterpret_cast<param_n_t<Index> *>(params[Index])...);
             for (auto &x : vecparams) x.first += x.second;
         }
     }
@@ -1591,19 +1630,18 @@ private:
     template <size_t... Index, size_t... VIndex, size_t... BIndex>
     void apply_broadcast(std::array<buffer_info, NVectorized> &buffers,
                          std::array<void *, N> &params,
-                         array_t<Return> &output_array,
+                         Return *out,
+                         size_t size,
+                         const std::vector<ssize_t> &output_shape,
                          index_sequence<Index...>, index_sequence<VIndex...>, index_sequence<BIndex...>) {
 
-        buffer_info output = output_array.request();
-        multi_array_iterator<NVectorized> input_iter(buffers, output.shape);
+        multi_array_iterator<NVectorized> input_iter(buffers, output_shape);
 
-        for (array_iterator<Return> iter = array_begin<Return>(output), end = array_end<Return>(output);
-             iter != end;
-             ++iter, ++input_iter) {
+        for (size_t i = 0; i < size; ++i, ++input_iter) {
             PYBIND11_EXPAND_SIDE_EFFECTS((
                 params[VIndex] = input_iter.template data<BIndex>()
             ));
-            *iter = f(*reinterpret_cast<param_n_t<Index> *>(std::get<Index>(params))...);
+            returned_array::call(out, i, f, *reinterpret_cast<param_n_t<Index> *>(std::get<Index>(params))...);
         }
     }
 };

@@ -13,26 +13,45 @@ modernization and other useful information.
 v2.6
 ====
 
-The ``tools/clang`` submodule and ``tools/mkdoc.py`` have been moved to a
-standalone package, `pybind11-mkdoc`_. If you were using those tools, please
-use them via a pip install from the new location.
+Usage of the ``PYBIND11_OVERLOAD*`` macros and ``get_overload`` function should
+be replaced by ``PYBIND11_OVERRIDE*`` and ``get_override``. In the future, the
+old macros may be deprecated and removed.
 
-.. _pybind11-mkdoc: https://github.com/pybind/pybind11-mkdoc
+``py::module`` has been renamed ``py::module_``, but a backward compatible
+typedef has been included. This change was to avoid a language change in C++20
+that requires unqualified ``module`` not be placed at the start of a logical
+line. Qualified usage is unaffected and the typedef will remain unless the
+C++ language rules change again.
+
+The public constructors of ``py::module_`` have been deprecated. Use
+``PYBIND11_MODULE`` or ``module_::create_extension_module`` instead.
 
 An error is now thrown when ``__init__`` is forgotten on subclasses. This was
 incorrect before, but was not checked. Add a call to ``__init__`` if it is
 missing.
 
+A ``py::type_error`` is now thrown when casting to a subclass (like
+``py::bytes`` from ``py::object``) if the conversion is not valid. Make a valid
+conversion instead.
+
 The undocumented ``h.get_type()`` method has been deprecated and replaced by
 ``py::type::of(h)``.
+
+Enums now have a ``__str__`` method pre-defined; if you want to override it,
+the simplest fix is to add the new ``py::prepend()`` tag when defining
+``"__str__"``.
 
 If ``__eq__`` defined but not ``__hash__``, ``__hash__`` is now set to
 ``None``, as in normal CPython. You should add ``__hash__`` if you intended the
 class to be hashable, possibly using the new ``py::hash`` shortcut.
 
-Usage of the ``PYBIND11_OVERLOAD*`` macros and ``get_overload`` function should
-be replaced by ``PYBIND11_OVERRIDE*`` and ``get_override``. In the future, the
-old macros may be deprecated and removed.
+The constructors for ``py::array`` now always take signed integers for size,
+for consistency. This may lead to compiler warnings on some systems. Cast to
+``py::ssize_t`` instead of ``std::size_t``.
+
+The ``tools/clang`` submodule and ``tools/mkdoc.py`` have been moved to a
+standalone package, `pybind11-mkdoc`_. If you were using those tools, please
+use them via a pip install from the new location.
 
 The ``pybind11`` package on PyPI no longer fills the wheel "headers" slot - if
 you were using the headers from this slot, they are available by requesting the
@@ -40,6 +59,8 @@ you were using the headers from this slot, they are available by requesting the
 be unaffected, as the ``pybind11/include`` location is reported by ``python -m
 pybind11 --includes`` and ``pybind11.get_include()`` is still correct and has
 not changed since 2.5).
+
+.. _pybind11-mkdoc: https://github.com/pybind/pybind11-mkdoc
 
 CMake support:
 --------------
@@ -54,7 +75,7 @@ something. The changes are:
 
 * If you do not request a standard, pybind11 targets will compile with the
   compiler default, but not less than C++11, instead of forcing C++14 always.
-  If you depend on the old behavior, please use ``set(CMAKE_CXX_STANDARD 14)``
+  If you depend on the old behavior, please use ``set(CMAKE_CXX_STANDARD 14 CACHE STRING "")``
   instead.
 
 * Direct ``pybind11::module`` usage should always be accompanied by at least
@@ -80,7 +101,8 @@ In addition, the following changes may be of interest:
 * Using ``find_package(Python COMPONENTS Interpreter Development)`` before
   pybind11 will cause pybind11 to use the new Python mechanisms instead of its
   own custom search, based on a patched version of classic ``FindPythonInterp``
-  / ``FindPythonLibs``. In the future, this may become the default.
+  / ``FindPythonLibs``. In the future, this may become the default. A recent
+  (3.15+ or 3.18.2+) version of CMake is recommended.
 
 
 
@@ -170,7 +192,7 @@ way to get and set object state. See :ref:`pickling` for details.
         ...
         .def(py::pickle(
             [](const Foo &self) { // __getstate__
-                return py::make_tuple(f.value1(), f.value2(), ...); // unchanged
+                return py::make_tuple(self.value1(), self.value2(), ...); // unchanged
             },
             [](py::tuple t) { // __setstate__, note: no `self` argument
                 return new Foo(t[0].cast<std::string>(), ...);

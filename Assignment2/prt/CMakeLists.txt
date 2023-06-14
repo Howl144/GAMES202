@@ -1,6 +1,6 @@
 cmake_minimum_required (VERSION 3.2)
 project(nori)
-
+set(CMAKE_EXPORT_COMPILE_COMMANDS YES)
 add_subdirectory(ext ext_build)
 
 include_directories(
@@ -109,7 +109,7 @@ add_executable(warptest
 )
 
 if (WIN32)
-  target_compile_options(nori PUBLIC /utf-8) # MSVC unicode support
+  target_compile_options(nori PUBLIC /utf-8 -pthread) # MSVC unicode support
   target_link_libraries(nori tbb_static pugixml IlmImf nanogui  ${NANOGUI_EXTRA_LIBS} zlibstatic)
 else()
   target_link_libraries(nori tbb_static pugixml IlmImf nanogui  ${NANOGUI_EXTRA_LIBS})
