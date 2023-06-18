@@ -13,10 +13,10 @@
 // limitations under the License.
 
 #include "sh/spherical_harmonics.h"
+#include <nori/common.h>
 
 #include <iostream>
 #include <limits>
-#include <random>
 
 namespace sh {
 
@@ -621,23 +621,19 @@ std::unique_ptr<std::vector<double>> ProjectFunction(
   CHECK(order >= 0, "Order must be at least zero.");
   CHECK(sample_count > 0, "Sample count must be at least one.");
 
-  // This is the approach demonstrated in [1] and is useful for arbitrary
-  // functions on the sphere that are represented analytically.
   const int sample_side = static_cast<int>(floor(sqrt(sample_count)));
+
   std::unique_ptr<std::vector<double>> coeffs(new std::vector<double>());
   coeffs->assign(GetCoefficientCount(order), 0.0);
-
-  // generate sample_side^2 uniformly and stratified samples over the sphere
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_real_distribution<> rng(0.0, 1.0);
   for (int t = 0; t < sample_side; t++) {
     for (int p = 0; p < sample_side; p++) {
-      double alpha = (t + rng(gen)) / sample_side;
-      double beta = (p + rng(gen)) / sample_side;
+      //带入t和p，使采样点更加均匀。
+      double x1 = (t + nori::genRandomFloat()) / sample_side;
+      double x2 = (p + nori::genRandomFloat()) / sample_side;
       // See http://www.bogotobogo.com/Algorithms/uniform_distribution_sphere.php
-      double phi = 2.0 * M_PI * beta;
-      double theta = acos(2.0 * alpha - 1.0);
+      // 采用文章中的方法，生成均匀分布的球面采样点，但是thita和phi的值是颠倒的，我们这里纠正一下
+      double phi = 2.0 * M_PI * x1;
+      double theta = acos(2.0 * x2 - 1.0);
 
       // evaluate the analytic function for the current spherical coords
       double func_value = func(phi, theta);
@@ -647,20 +643,13 @@ std::unique_ptr<std::vector<double>> ProjectFunction(
       for (int l = 0; l <= order; l++) {
         for (int m = -l; m <= l; m++) {
           double sh = EvalSH(l, m, phi, theta);
-          (*coeffs)[GetIndex(l, m)] += func_value * sh;
+          //蒙特卡洛积分
+          double pdf = 1.0 / (4 * M_PI);
+          (*coeffs)[GetIndex(l, m)] += 1 / M_PI * func_value * sh / pdf / sample_count;
         }
       }
     }
   }
-
-  // scale by the probability of a particular sample, which is
-  // 4pi/sample_side^2. 4pi for the surface area of a unit sphere, and
-  // 1/sample_side^2 for the number of samples drawn uniformly.
-  double weight = 4.0 * M_PI / (sample_side * sample_side);
-  for (unsigned int i = 0; i < coeffs->size(); i++) {
-     (*coeffs)[i] *= weight;
-  }
-
   return coeffs;
 }
 

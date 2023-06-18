@@ -1,6 +1,7 @@
 #include <nori/integrator.h>
 #include <nori/scene.h>
 #include <nori/ray.h>
+#include <nori/common.h>
 #include <filesystem/resolver.h>
 #include <sh/spherical_harmonics.h>
 #include <sh/default_image.h>
@@ -8,6 +9,8 @@
 #include <fstream>
 #include <random>
 #include <stb_image.h>
+#include <type_traits>
+#include <cassert>
 
 NORI_NAMESPACE_BEGIN
 
@@ -42,21 +45,13 @@ namespace ProjEnv
                 exit(-1);
             }
             images[i] = std::unique_ptr<float[]>(image);
-            int index = (0 * 128 + 0) * channel;
-            // std::cout << images[i][index + 0] << "\t" << images[i][index + 1] << "\t"
-            //           << images[i][index + 2] << std::endl;
+            // int index = (0 * 128 + 0) * channel;
+            // std::cout << images[i][index + 0] << "\t" << images[i][index + 1] << "\t"<< images[i][index + 2] << std::endl;
         }
         return images;
     }
 
-    const Eigen::Vector3f cubemapFaceDirections[6][3] = {
-        {{0, 0, 1}, {0, -1, 0}, {-1, 0, 0}},  // negx
-        {{0, 0, 1}, {0, -1, 0}, {1, 0, 0}},   // posx
-        {{1, 0, 0}, {0, 0, -1}, {0, -1, 0}},  // negy
-        {{1, 0, 0}, {0, 0, 1}, {0, 1, 0}},    // posy
-        {{-1, 0, 0}, {0, -1, 0}, {0, 0, -1}}, // negz
-        {{1, 0, 0}, {0, -1, 0}, {0, 0, 1}},   // posz
-    };
+   
 
     float CalcPreArea(const float &x, const float &y)
     {
@@ -66,6 +61,7 @@ namespace ProjEnv
     float CalcArea(const float &u_, const float &v_, const int &width,
                    const int &height)
     {
+        //https://www.rorydriscoll.com/2012/01/15/cubemap-texel-solid-angle/
         // transform from [0..res - 1] to [- (1 - 1 / res) .. (1 - 1 / res)]
         // ( 0.5 is for texel center addressing)
         float u = (2.0 * (u_ + 0.5) / width) - 1.0;
@@ -89,6 +85,15 @@ namespace ProjEnv
 
     // template <typename T> T ProjectSH() {}
 
+     const Eigen::Vector3f cubemapFaceDirections[6][3] = {
+        {{0, 0, 1}, {0, -1, 0}, {-1, 0, 0}},  // negx
+        {{0, 0, 1}, {0, -1, 0}, {1, 0, 0}},   // posx
+        {{1, 0, 0}, {0, 0, -1}, {0, -1, 0}},  // negy
+        {{1, 0, 0}, {0, 0, 1}, {0, 1, 0}},    // posy
+        {{-1, 0, 0}, {0, -1, 0}, {0, 0, -1}}, // negz
+        {{1, 0, 0}, {0, -1, 0}, {0, 0, 1}},   // posz
+    };
+
     template <size_t SHOrder>
     std::vector<Eigen::Array3f> PrecomputeCubemapSH(const std::vector<std::unique_ptr<float[]>> &images,
                                                     const int &width, const int &height,
@@ -96,6 +101,7 @@ namespace ProjEnv
     {
         std::vector<Eigen::Vector3f> cubemapDirs;
         cubemapDirs.reserve(6 * width * height);
+        //cubemap上的每个像素对应的方向
         for (int i = 0; i < 6; i++)
         {
             Eigen::Vector3f faceDirX = cubemapFaceDirections[i][0];
@@ -112,21 +118,25 @@ namespace ProjEnv
                 }
             }
         }
+        //初始化ShCoeffiecents
         constexpr int SHNum = (SHOrder + 1) * (SHOrder + 1);
         std::vector<Eigen::Array3f> SHCoeffiecents(SHNum);
         for (int i = 0; i < SHNum; i++)
             SHCoeffiecents[i] = Eigen::Array3f(0);
-        float sumWeight = 0;
+        
         for (int i = 0; i < 6; i++)
         {
             for (int y = 0; y < height; y++)
             {
                 for (int x = 0; x < width; x++)
                 {
-                    // TODO: here you need to compute light sh of each face of cubemap of each pixel
-                    // TODO: 此处你需要计算每个像素下cubemap某个面的球谐系数
+                    // TODO: here you need to compute light sh of each pixel of each face of cubemap 
+
+                    //索引像素对应的方向
                     Eigen::Vector3f dir = cubemapDirs[i * width * height + y * width + x];
+                    //像素的索引
                     int index = (y * width + x) * channel;
+                    //RGB值
                     Eigen::Array3f Le(images[i][index + 0], images[i][index + 1],
                                       images[i][index + 2]);
 
@@ -135,7 +145,9 @@ namespace ProjEnv
 
                     for (int l = 0; l <= SHOrder; l++) {
                         for (int m = -l; m <= l; m++) {
+                            //计算基函数
                             auto basic_sh_proj = sh::EvalSH(l, m, Eigen::Vector3d(dir.x(), dir.y(), dir.z()).normalized());
+                            //计算le在基函数上的投影，并且用黎曼和近似积分
                             SHCoeffiecents[sh::GetIndex(l, m)] += Le * basic_sh_proj * delta_w;
                         }
                     }
@@ -164,6 +176,7 @@ public:
     {
         /* No parameters this time */
         m_SampleCount = props.getInteger("PRTSampleCount", 100);
+        m_Bounce = props.getInteger("bounce", 1);
         m_CubemapPath = props.getString("cubemap");
         auto type = props.getString("type", "unshadowed");
         if (type == "unshadowed")
@@ -184,25 +197,28 @@ public:
             throw NoriException("Unsupported type: %s.", type);
         }
     }
-
-    std::unique_ptr<std::vector<double>> computeInterreflectionSH(Eigen::MatrixXf* directTSHCoeffs, const Point3f& pos, const Normal3f& normal, const Scene* scene, int bounces)
+    template<typename T>
+    std::unique_ptr<std::vector<double>> computeInterreflectionSH(Eigen::MatrixXf* directTSHCoeffs, 
+                                                                const Point3f& pos, const Normal3f& normal, T&& Lds,
+                                                                const Scene* scene, int bounces)
     {
         std::unique_ptr<std::vector<double>> coeffs(new std::vector<double>());
         coeffs->assign(SHCoeffLength, 0.0);
 
-        if (bounces > m_Bounce)
+        for (int i = 0; i < coeffs->size(); i++){
+            (*coeffs)[i] += Lds[i];
+        }
+
+        if (bounces >= m_Bounce)
             return coeffs;
 
         const int sample_side = static_cast<int>(floor(sqrt(m_SampleCount)));
-        std::random_device rd;
-        std::mt19937 gen(rd());
-        std::uniform_real_distribution<> rng(0.0, 1.0);
         for (int t = 0; t < sample_side; t++) {
             for (int p = 0; p < sample_side; p++) {
-                double alpha = (t + rng(gen)) / sample_side;
-                double beta = (p + rng(gen)) / sample_side;
-                double phi = 2.0 * M_PI * beta;
-                double theta = acos(2.0 * alpha - 1.0);
+                double x1 = (t + nori::genRandomFloat()) / sample_side;
+                double x2 = (p + nori::genRandomFloat()) / sample_side;
+                double phi = 2.0 * M_PI * x1;
+                double theta = acos(2.0 * x2 - 1.0);
 
                 Eigen::Array3d d = sh::ToVector(phi, theta);
                 const auto wi = Vector3f(d.x(), d.y(), d.z());
@@ -214,29 +230,26 @@ public:
                     Point3f idx = its.tri_index;
                     Point3f hitPos = its.p;
                     Vector3f bary = its.bary;
-
+                    //利用重心坐标插值三角形各顶点的法向量
                     Normal3f hitNormal =
                         Normal3f(normals.col(idx.x()).normalized() * bary.x() +
                             normals.col(idx.y()).normalized() * bary.y() +
                             normals.col(idx.z()).normalized() * bary.z())
                         .normalized();
-
-                    auto nextBouncesCoeffs = computeInterreflectionSH(directTSHCoeffs, hitPos, hitNormal, scene, bounces + 1);
+                    //重心坐标插值三角形各顶点的(V * brdf * wiDotN)投影到球谐基函数后得到的coeffs值
+                    auto interpolateSH = 
+                            directTSHCoeffs->col(idx.x()) * bary.x() +
+                            directTSHCoeffs->col(idx.y()) * bary.y() +
+                            directTSHCoeffs->col(idx.z()) * bary.z();
+                    auto nextBouncesCoeffs = computeInterreflectionSH(directTSHCoeffs, hitPos, hitNormal, interpolateSH ,scene, bounces + 1);
 
                     for (int i = 0; i < SHCoeffLength; i++)
                     {
-                        auto interpolateSH = (directTSHCoeffs->col(idx.x()).coeffRef(i) * bary.x() +
-                            directTSHCoeffs->col(idx.y()).coeffRef(i) * bary.y() +
-                            directTSHCoeffs->col(idx.z()).coeffRef(i) * bary.z());
-
-                        (*coeffs)[i] += (interpolateSH + (*nextBouncesCoeffs)[i]) * H;
+                        //采样到投影后的coeffes乘以cos做权重，这里不是蒙特卡洛积分。
+                        (*coeffs)[i] +=  (*nextBouncesCoeffs)[i] * H / m_SampleCount;
                     }
                 }
             }
-        }
-
-        for (unsigned int i = 0; i < coeffs->size(); i++) {
-            (*coeffs)[i] /= sample_side * sample_side;
         }
         
         return coeffs;
@@ -257,9 +270,14 @@ public:
         std::vector<std::unique_ptr<float[]>> images =
             ProjEnv::LoadCubemapImages(cubePath.str(), width, height, channel);
         auto envCoeffs = ProjEnv::PrecomputeCubemapSH<SHOrder>(images, width, height, channel);
+        /*                    envCoeffs[0] , envCoeffs[1] ... envCoeffs[SHCoeffLength-1]
+         * m_LightCoeffs = [  envCoeffs[0] , envCoeffs[1] ... envCoeffs[SHCoeffLength-1] ]
+         *                    envCoeffs[0] , envCoeffs[1] ... envCoeffs[SHCoeffLength-1]
+        */
         m_LightCoeffs.resize(3, SHCoeffLength);
         for (int i = 0; i < envCoeffs.size(); i++)
         {
+            //cubemap中每个像素le的值投影到球面谐波的基函数上得到coeffs
             lightFout << (envCoeffs)[i].x() << " " << (envCoeffs)[i].y() << " " << (envCoeffs)[i].z() << std::endl;
             m_LightCoeffs.col(i) = (envCoeffs)[i];
         }
@@ -271,6 +289,7 @@ public:
         {
             const Point3f &v = mesh->getVertexPositions().col(i);
             const Normal3f &n = mesh->getVertexNormals().col(i);
+
             auto shFunc = [&](double phi, double theta) -> double {
                 Eigen::Array3d d = sh::ToVector(phi, theta);
                 const auto wi = Vector3f(d.x(), d.y(), d.z());
@@ -297,7 +316,7 @@ public:
             for (int j = 0; j < shCoeff->size(); j++)
             {
                 // Edit Start
-                m_TransportSHCoeffs.col(i).coeffRef(j) = (*shCoeff)[j] / M_PI ;
+                m_TransportSHCoeffs.col(i).coeffRef(j) = (*shCoeff)[j];
                 // Edit End
             }
         }
@@ -309,10 +328,10 @@ public:
             {
                 const Point3f& v = mesh->getVertexPositions().col(i);
                 const Normal3f& n = mesh->getVertexNormals().col(i).normalized();
-                auto indirectCoeffs = computeInterreflectionSH(&m_TransportSHCoeffs, v, n, scene, 1);
+                auto indirectCoeffs = computeInterreflectionSH(&m_TransportSHCoeffs, v, n,m_TransportSHCoeffs.col(i), scene, 0);
                 for (int j = 0; j < SHCoeffLength; j++)
                 {
-                    m_TransportSHCoeffs.col(i).coeffRef(j) += (*indirectCoeffs)[j];
+                    m_TransportSHCoeffs.col(i).coeffRef(j) = (*indirectCoeffs)[j];
                 }
                 std::cout << "computing interreflection light sh coeffs, current vertex idx: " << i << " total vertex idx: " << mesh->getVertexCount() << std::endl;
             }
@@ -370,8 +389,8 @@ public:
 
 private:
     Type m_Type;
-    int m_Bounce = 1;
-    int m_SampleCount = 100;
+    int m_Bounce;
+    int m_SampleCount;
     std::string m_CubemapPath;
     Eigen::MatrixXf m_TransportSHCoeffs;
     Eigen::MatrixXf m_LightCoeffs;

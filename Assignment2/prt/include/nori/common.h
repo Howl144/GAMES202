@@ -33,6 +33,7 @@
 #include <stdint.h>
 #include <ImathPlatform.h>
 #include <tinyformat.h>
+#include <random>
 
 /* Convenience definitions */
 #define NORI_NAMESPACE_BEGIN namespace nori {
@@ -229,6 +230,13 @@ inline int clamp(int value, int min, int max) {
 /// Linearly interpolate between two values
 inline float lerp(float t, float v1, float v2) {
     return ((float) 1 - t) * v1 + t * v2;
+}
+//random number generator
+inline float genRandomFloat(){
+    static std::random_device rd;
+    static std::mt19937 gen(rd());
+    static std::uniform_real_distribution<> rng(0.0, 1.0);
+    return rng(gen);
 }
 
 /// Always-positive modulo operation

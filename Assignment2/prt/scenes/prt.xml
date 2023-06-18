@@ -10,6 +10,7 @@
 		<integer name="bounce" value="2" />
 		<integer name="PRTSampleCount" value="100" />
 		<string name="cubemap" value="cubemap/CornellBox" />
+		<string name="material" value="diffuse" />
 	</integrator>
 
     <!-- Load the Stanford bunny (https://graphics.stanford.edu/data/3Dscanrep/) -->
