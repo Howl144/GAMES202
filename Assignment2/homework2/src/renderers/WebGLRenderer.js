@@ -51,7 +51,7 @@ class WebGLRenderer {
 
                     let cameraModelMatrix = mat4.create();
                     // Edit Start
-                    mat4.fromRotation(cameraModelMatrix, timer * 10, [0, 1, 0]);
+                    mat4.fromRotation(cameraModelMatrix, timer * 5, [0, 1, 0]);
                     // Edit End
 
                     if (k == 'uMoveWithCamera') { // The rotation of the skybox
@@ -65,7 +65,6 @@ class WebGLRenderer {
                     let precomputeL_RGBMat3 = getRotationPrecomputeL(precomputeL[guiParams.envmapId], cameraModelMatrix);
                     
                     // Edit Start
-                    // let Mat3Value = getMat3ValueFromRGB(precomputeL[guiParams.envmapId])
                     let Mat3Value = getMat3ValueFromRGB(precomputeL_RGBMat3);
                     for(let j = 0; j < 3; j++){
                         if (k == 'uPrecomputeL['+j+']') {

@@ -57,7 +57,6 @@ class MeshRender {
 			const stride = 0;
 			const offset = 0;
 			gl.bindBuffer(gl.ARRAY_BUFFER, this.#vertexBuffer);
-			//console.log(this.shader.program.attribs[this.mesh.verticesName]) 
 			gl.vertexAttribPointer(
 				this.shader.program.attribs[this.mesh.verticesName],
 				numComponents,
@@ -204,10 +203,9 @@ class MeshRender {
 		const buf = gl.createBuffer();
 		gl.bindBuffer(gl.ARRAY_BUFFER, buf);
 		gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(precomputeLT[guiParams.envmapId]), gl.STATIC_DRAW);
-	
-		for (var ii = 0; ii < 3; ++ii) {
-			gl.enableVertexAttribArray(this.shader.program.attribs['aPrecomputeLT'] + ii);
-			gl.vertexAttribPointer(this.shader.program.attribs['aPrecomputeLT'] + ii, 3, gl.FLOAT, false, 36, ii * 12);
+		for (let i = 0; i < 3; ++i) {
+			gl.enableVertexAttribArray(this.shader.program.attribs['aPrecomputeLT'] + i);
+			gl.vertexAttribPointer(this.shader.program.attribs['aPrecomputeLT'] + i, 3, gl.FLOAT, false, 36, i * 12);
 		}
 
 		// Bind geometry information

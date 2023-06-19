@@ -3,12 +3,14 @@ let precomputeL = [];
 var cameraPosition = [0, 0, 100];
 
 var envmap = [
-	'assets/cubemap/GraceCathedral',
-	'assets/cubemap/Indoor',
-	'assets/cubemap/Skybox',
-	// Edit Start
-	'assets/cubemap/CornellBox',
-	// Edit End
+	'assets/cubemap/GraceCathedral_DI',
+	'assets/cubemap/GraceCathedral_GI',
+	'assets/cubemap/Indoor_DI',
+	'assets/cubemap/Indoor_GI',
+	'assets/cubemap/Skybox_DI',
+	'assets/cubemap/Skybox_GI',
+	'assets/cubemap/CornellBox_DI',
+	'assets/cubemap/CornellBox_GI'
 ];
 
 var guiParams = {
@@ -117,11 +119,8 @@ async function GAMES202Main() {
 	}
 
 	// TODO: load model - Add your Material here
-	// loadOBJ(renderer, 'assets/bunny/', 'bunny', 'addYourPRTMaterial', boxTransform);
-	// loadOBJ(renderer, 'assets/bunny/', 'bunny', 'addYourPRTMaterial', box2Transform);
-
 	// Edit Start
-	let maryTransform = setTransform(0, -35, 0, 20, 20, 20);
+	let maryTransform = setTransform(0, -65, 0, 40, 40, 40);
 	loadOBJ(renderer, 'assets/mary/', 'mary', 'PRTMaterial', maryTransform);
 	// Edit End
 
@@ -129,7 +128,12 @@ async function GAMES202Main() {
 		const gui = new dat.gui.GUI();
 		const panelModel = gui.addFolder('Switch Environemtn Map');
 		// Edit Start
-		panelModel.add(guiParams, 'envmapId', { 'GraceGathedral': 0, 'Indoor': 1, 'Skybox': 2, 'CornellBox': 3}).name('Envmap Name');
+		panelModel.add(guiParams, 'envmapId', { 
+			'GraceGathedral_DI': 0, 'GraceGathedral_GI': 1, 
+			'Indoor_DI': 2, 'Indoor_GI': 3, 
+			'Skybox_DI': 4, 'Skybox_GI': 5,
+			'CornellBox_DI': 6,'CornellBox_GI': 7
+		}).name('Envmap Name');
 		// Edit End
 		panelModel.open();
 	}

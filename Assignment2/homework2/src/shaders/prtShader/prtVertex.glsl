@@ -23,12 +23,11 @@ float L_dot_LT(mat3 PrecomputeL, mat3 PrecomputeLT) {
 }
 
 void main(void) {
-  // 无实际作用，避免aNormalPosition被优化后产生警告
   vNormal = (uModelMatrix * vec4(aNormalPosition, 0.0)).xyz;
 
   for(int i = 0; i < 3; i++)
   {
-    vColor[i] = L_dot_LT(aPrecomputeLT, uPrecomputeL[i]);
+    vColor[i] = L_dot_LT(uPrecomputeL[i],aPrecomputeLT);
   }
 
   gl_Position = uProjectionMatrix * uViewMatrix * uModelMatrix * vec4(aVertexPosition, 1.0);
