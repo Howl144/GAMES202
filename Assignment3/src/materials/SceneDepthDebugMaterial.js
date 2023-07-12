@@ -1,20 +1,17 @@
 class SceneDepthDebugMaterial extends Material {
-    constructor(vertexShader, fragmentShader) {
+    constructor(ZBufferParams,vertexShader, fragmentShader) {
         let uniforms = {
-            'uTime': { type: '1f', value: 0 },
-        }
+            'uDepthTexture' : { type: 'texture', value: 0 },
+            'uZBufferParams' : { type: '3fv', value: ZBufferParams }
 
-        for(let i = 0; i < mipMapLevel; i++){
-            uniforms['uDepthTexture' + '[' + i + ']'] = { type: 'texture', value: null };
         }
-
         super(uniforms, [], vertexShader, fragmentShader);
     }
 }
 
-async function buildSceneDepthDebugMaterial(vertexPath, fragmentPath) {
+async function buildSceneDepthDebugMaterial(ZBufferParams,vertexPath, fragmentPath) {
     let vertexShader = await getShaderString(vertexPath);
     let fragmentShader = await getShaderString(fragmentPath);
 
-    return new SceneDepthDebugMaterial(vertexShader, fragmentShader);
+    return new SceneDepthDebugMaterial(ZBufferParams,vertexShader, fragmentShader);
 }

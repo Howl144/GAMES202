@@ -1,4 +1,4 @@
-function loadGLTF(renderer, path, name, materialName) {
+function loadGLTF(renderer, path, name, materialName,uZBufferParams,ssrFragmentPath) {
 
 	const manager = new THREE.LoadingManager();
 	manager.onProgress = function (item, loaded, total) {
@@ -52,9 +52,9 @@ function loadGLTF(renderer, path, name, materialName) {
 					let light = renderer.lights[0].entity;
 					switch (materialName) {
 						case 'SSRMaterial':
-							material = buildSSRMaterial(diffuseMap, specularMap, light, renderer.camera, "./src/shaders/ssrShader/ssrVertex.glsl", "./src/shaders/ssrShader/ssrFragment.glsl");
+							material = buildSSRMaterial(diffuseMap, specularMap, light, renderer.camera,uZBufferParams, "./src/shaders/ssrShader/ssrVertex.glsl", ssrFragmentPath);
 							shadowMaterial = buildShadowMaterial(light, "./src/shaders/shadowShader/shadowVertex.glsl", "./src/shaders/shadowShader/shadowFragment.glsl");
-							bufferMaterial = buildGbufferMaterial(diffuseMap, normalMap, light, renderer.camera, "./src/shaders/gbufferShader/gbufferVertex.glsl", "./src/shaders/gbufferShader/gbufferFragment.glsl");
+							bufferMaterial = buildGbufferMaterial(diffuseMap, normalMap, light, renderer.camera,uZBufferParams, "./src/shaders/gbufferShader/gbufferVertex.glsl", "./src/shaders/gbufferShader/gbufferFragment.glsl");
 							break;
 					}
 
@@ -71,7 +71,6 @@ function loadGLTF(renderer, path, name, materialName) {
 						renderer.addBufferMeshRender(bufferMeshRender);
 					});
 				}
-
 			});
 		});
 }

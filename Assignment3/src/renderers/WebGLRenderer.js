@@ -1,3 +1,4 @@
+
 class WebGLRenderer {
     meshes = [];
     shadowMeshes = [];
@@ -33,7 +34,7 @@ class WebGLRenderer {
         var light = this.lights[0];
 
         const gl = this.gl;
-        gl.clearColor(0.0, 0.0, 0.0, 1.0);
+        gl.clearColor(0.0, 0.0, 0.0, 0.0);
         gl.clearDepth(1.0);
         gl.enable(gl.DEPTH_TEST);
         gl.depthFunc(gl.LEQUAL);
@@ -58,16 +59,14 @@ class WebGLRenderer {
             this.shadowMeshes[i].draw(this.camera, light.entity.fbo, updatedParamters);
             // this.shadowMeshes[i].draw(this.camera);
         }
-        // return;
 
         // Buffer pass
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.camera.fbo);
+        gl.clearColor(1.0, 1.0, 1.0, 1.0);
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
         for (let i = 0; i < this.bufferMeshes.length; i++) {
             this.bufferMeshes[i].draw(this.camera, this.camera.fbo, updatedParamters);
-            // this.bufferMeshes[i].draw(this.camera);
         }
-        // return
 
         // Depth Mipmap pass
         // Edit Start
@@ -77,7 +76,6 @@ class WebGLRenderer {
             gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
             let updatedParamters = {
-                "uLastMipLevel": lv - 1,
                 "uLastMipSize": [this.depthFBOs[lv].lastWidth, this.depthFBOs[lv].lastHeight, 0],
                 "uCurLevel": lv,
             };
@@ -91,41 +89,39 @@ class WebGLRenderer {
             depthMeshRender.bindMaterialParameters();
             
             gl.viewport(0, 0, this.depthFBOs[lv].width, this.depthFBOs[lv].height);
-            {
-				const vertexCount = depthMeshRender.mesh.count;
-				const type = gl.UNSIGNED_SHORT;
-				const offset = 0;
-				gl.drawElements(gl.TRIANGLES, vertexCount, type, offset);
-			}
+            
+            const vertexCount = depthMeshRender.mesh.count;
+            const type = gl.UNSIGNED_SHORT;
+            const offset = 0;
+            gl.drawElements(gl.TRIANGLES, vertexCount, type, offset);
         }
         gl.bindTexture(gl.TEXTURE_2D, null);
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         // Edit End
 
         // Camera pass
+        gl.clearColor(0.0, 0.0, 0.0, 0.0);
+        gl.viewport(0, 0, windowWidth, windowHeight);
         for (let i = 0; i < this.meshes.length; i++) {
             // Edit Start
             for(let lv = 0; lv < mipMapLevel; lv++){
-                if(this.depthFBOs.length > lv){
-                    updatedParamters['uDepthTexture' + '[' + lv + ']'] = this.depthFBOs[lv].textures[0];
-                }
+                updatedParamters['uDepthTexture' + '[' + lv + ']'] = this.depthFBOs[lv].textures[0];
             }
             // Edit End
             this.meshes[i].draw(this.camera, null, updatedParamters);
         }
 
-        // Depth debug pass
-        // Edit Start
+        // //Depth debug pass
+        // //Edit Start
+        // // console.log("(time / 1000) % 9 : ",Math.floor((time / 1000.0) % 10.0) );
+        // gl.clearColor(0.0, 0.0, 0.0, 0.0);
+        // let debugLevel = Math.floor((time / 1000.0) % 10.0);
         // if (depthDebugMeshRender != null) {
-        //     for(let lv = 0; lv < mipMapLevel; lv++){
-        //         if(this.depthFBOs.length > lv){
-        //             updatedParamters['uTime'] = time / 1000;
-        //             console.log("time: ", time / 1000);
-        //             updatedParamters['uDepthTexture' + '[' + lv + ']'] = this.depthFBOs[lv].textures[0];
-        //         }
+        //     if(this.depthFBOs.length > 0){
+        //         updatedParamters['uDepthTexture'] = this.depthFBOs[debugLevel].textures[0];
+        //         depthDebugMeshRender.draw(this.camera, null, updatedParamters);
         //     }
-        //     depthDebugMeshRender.draw(this.camera, null, updatedParamters);
         // }
-        // Edit End
+        // //Edit End
     }
 }

@@ -112,7 +112,11 @@ class MeshRender {
 
 		let modelMatrix = mat4.create();
 		let viewMatrix = mat4.create();
+		let transInvViewMat = mat4.create();
+
 		let projectionMatrix = mat4.create();
+		let invProjMat = mat4.create();
+		
 		// Model transform
 		mat4.identity(modelMatrix);
 		mat4.translate(modelMatrix, modelMatrix, this.mesh.transform.translate);
@@ -142,6 +146,19 @@ class MeshRender {
 		gl.uniform3fv(
 			this.shader.program.uniforms.uCameraPos,
 			[camera.position.x, camera.position.y, camera.position.z]);
+
+		mat4.invert(viewMatrix,viewMatrix);
+		mat4.transpose(viewMatrix,viewMatrix);
+		gl.uniformMatrix4fv(
+			this.shader.program.uniforms.uTransInvViewMat,
+			false,
+			viewMatrix);
+
+		mat4.invert(projectionMatrix,projectionMatrix);
+		gl.uniformMatrix4fv(
+			this.shader.program.uniforms.uInvProjMat,
+			false,
+			projectionMatrix);
 	}
 
 	bindMaterialParameters() {

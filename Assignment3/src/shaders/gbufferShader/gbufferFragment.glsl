@@ -8,30 +8,28 @@ layout(location = 0) out vec4 Frag0;
 layout(location = 1) out vec4 Frag1;  
 layout(location = 2) out vec4 Frag2;
 layout(location = 3) out vec4 Frag3;
-layout(location = 4) out vec4 Frag4;
-// layout(location = 5) out vec4 Frag5;
 
+//diffuse map
 uniform sampler2D uKd;
+//normal map
 uniform sampler2D uNt;
 uniform sampler2D uShadowMap;
-
-// varying mat4 vWorldToLight;
-// varying highp vec2 vTextureCoord;
-// varying highp vec4 vPosWorld;
-// varying highp vec3 vNormalWorld;
-// varying highp float vDepth;
+uniform vec3 uZBufferParams;
 
 in mat4 vWorldToLight;
 in vec2 vTextureCoord;
 in vec4 vPosWorld;
-in vec3 vNormalWorld;
-in float vDepth;
+in vec3 vNormalWS;
+
 
 float SimpleShadowMap(vec3 posWorld,float bias){
+  //perspective of light
   vec4 posLight = vWorldToLight * vec4(posWorld, 1.0);
+  //to screen space
   vec2 shadowCoord = clamp(posLight.xy * 0.5 + 0.5, vec2(0.0), vec2(1.0));
   float depthSM = texture(uShadowMap, shadowCoord).x;
-  float depth = (posLight.z * 0.5 + 0.5) * 100.0;
+  float depth = posLight.z;
+  //阶跃函数，0.0为阈值，小于它返回0.0，大于它返回1.0
   return step(0.0, depthSM - depth + bias);
 }
 
@@ -48,33 +46,31 @@ void LocalBasis(vec3 n, out vec3 b1, out vec3 b2) {
 
 vec3 ApplyTangentNormalMap() {
   vec3 t, b;
-  LocalBasis(vNormalWorld, t, b);
+  vec3 normal = normalize(vNormalWS);
+  // t b n
+  LocalBasis(normal, t, b);
+  //法线向量的范围在-1到1之间
   vec3 nt = texture(uNt, vTextureCoord).xyz * 2.0 - 1.0;
-  nt = normalize(nt.x * t + nt.y * b + nt.z * vNormalWorld);
+  //法线从切线空间转到世界空间
+  nt = normalize(nt.x * t + nt.y * b + nt.z * normal);
   return nt;
 }
 
-#define u_Near 1e-2
-#define u_Far 1000.0f
-
-float LinearizeDepth(float depth)
+float Linear01Depth( float z )
 {
-    float z = depth * 2.0 - 1.0; 
-    return (2.0 * u_Near * u_Far) / (u_Far + u_Near - z * (u_Far - u_Near));
+  float farDivNear = uZBufferParams.y / uZBufferParams.x;
+  return 1.0 / ( ( 1.0 - farDivNear) * z + farDivNear);
 }
 
 void main(void) {
   vec3 kd = texture(uKd, vTextureCoord).rgb;
-  // gl_FragData[0] = vec4(kd, 1.0);
-  // gl_FragData[1] = vec4(vec3(vDepth), 1.0);
-  // gl_FragData[2] = vec4(ApplyTangentNormalMap(), 1.0);
-  // gl_FragData[3] = vec4(vec3(SimpleShadowMap(vPosWorld.xyz, 1e-2)), 1.0);
-  // gl_FragData[4] = vec4(vec3(vPosWorld.xyz), 1.0);
+  //albedo
   Frag0 = vec4(kd, 1.0);
-  Frag1 = vec4(vec3(vDepth), 1.0);
+  //depth
+  Frag1 = vec4(vec3(gl_FragCoord.z), 1.0);
+  //world space normal(uNt)
   Frag2 = vec4(ApplyTangentNormalMap(), 1.0);
-  Frag3 = vec4(vec3(SimpleShadowMap(vPosWorld.xyz, 1e-2)), 1.0);
-  Frag4 = vec4(vec3(vPosWorld.xyz), 1.0);
-  // Frag5 = vec4(vec3(vDepth), 1.0);
-  // Frag5 = vec4(vec3(LinearizeDepth(gl_FragCoord.z)/150.), 1.0);
+  //shadow value 0 or 1
+  Frag3 = vec4(vec3(SimpleShadowMap(vPosWorld.xyz, 1e-4)), 1.0);
+
 }

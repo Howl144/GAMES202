@@ -4,30 +4,14 @@
 precision mediump float;
 #endif
 
-uniform vec3 uLightPos;
-uniform vec3 uCameraPos;
-uniform sampler2D uSampler;
+layout(location = 0) out vec4 FragColor;
 
+uniform sampler2D uSampler;
 uniform sampler2D uDepthMipMap;
-uniform int uLastMipLevel;
 uniform vec3 uLastMipSize;
 uniform int uCurLevel;
 
 in vec2 vTextureCoord;
-
-out vec4 FragColor;
-
-vec4 pack (float depth) {
-    // 使用rgba 4字节共32位来存储z值,1个字节精度为1/256
-    const vec4 bitShift = vec4(1.0, 256.0, 256.0 * 256.0, 256.0 * 256.0 * 256.0);
-    const vec4 bitMask = vec4(1.0/256.0, 1.0/256.0, 1.0/256.0, 0.0);
-    // gl_FragCoord:片元的坐标,fract():返回数值的小数部分
-    vec4 rgbaDepth = fract(depth * bitShift); //计算每个点的z值
-    rgbaDepth -= rgbaDepth.gbaa * bitMask; // Cut off the value which do not fit in 8 bits
-    return rgbaDepth;
-}
-
-
 
 void main(){
     if(uCurLevel == 0){
@@ -35,10 +19,12 @@ void main(){
         FragColor = vec4(color, 1.0);
     }else{
 
-    ivec2 thisLevelTexelCoord = ivec2(gl_FragCoord);
+    //gl_FragCoord.xy由视口gl.viewport决定。
+    ivec2 thisLevelTexelCoord = ivec2(gl_FragCoord.xy);//向下取整
     ivec2 previousLevelBaseTexelCoord = thisLevelTexelCoord * 2;
 
     vec4 depthTexelValues;
+    //texelFetch 使用的是未归一化的坐标直接访问纹理中的纹素，不执行任何形式的过滤和插值操作，坐标范围为实际载入纹理图像的宽和高，且为整数。
     depthTexelValues.x = texelFetch(uDepthMipMap,
                                       previousLevelBaseTexelCoord,
                                       0).r;
@@ -58,6 +44,7 @@ void main(){
     // Incorporate additional texels if the previous level's width or height (or both)
     // are odd.
     ivec2 u_previousLevelDimensions = ivec2(uLastMipSize.x, uLastMipSize.y);
+    //是否为奇数
     bool shouldIncludeExtraColumnFromPreviousLevel = ((u_previousLevelDimensions.x & 1) != 0);
     bool shouldIncludeExtraRowFromPreviousLevel = ((u_previousLevelDimensions.y & 1) != 0);
     if (shouldIncludeExtraColumnFromPreviousLevel) {
@@ -70,7 +57,7 @@ void main(){
                                                 0).r;
 
       // In the case where the width and height are both odd, need to include the
-          // 'corner' value as well.
+      // 'corner' value as well.
       if (shouldIncludeExtraRowFromPreviousLevel) {
         float cornerTexelValue = texelFetch(uDepthMipMap,
                                                   previousLevelBaseTexelCoord + ivec2(2, 2),

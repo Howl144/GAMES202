@@ -9,10 +9,6 @@ layout(location = 0) out vec4 Frag0;
 
 uniform vec3 uCameraPos;
 
-// varying highp vec3 vNormal;
-// varying highp vec2 vTextureCoord;
-// varying highp float vDepth;
-
 in vec3 vNormal;
 in vec2 vTextureCoord;
 in float vDepth;
@@ -25,8 +21,7 @@ vec4 EncodeFloatRGBA(float v) {
 }
 
 void main(){
-  // gl_FragData[0] = vec4(vec3(gl_FragCoord.z) * 100.0, 1.0);
-  // gl_FragData[0] = EncodeFloatRGBA(gl_FragCoord.z * 100.0);
-
-  Frag0 = vec4(vec3(gl_FragCoord.z) * 100.0, 1.0);
+  //vDepth  = gl_FragCoord.z * 2.0 - 1.0;
+  //you can also use gl_FragCoord that contains the window-relative coordinates of the current fragment
+  Frag0 = vec4(vec3(vDepth), 1.0);
 }

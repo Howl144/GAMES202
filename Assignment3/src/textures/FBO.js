@@ -19,7 +19,6 @@ class FBO{
             }
             gl.bindTexture(gl.TEXTURE_2D, texture);
             // Edit Start
-            // gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, window.screen.width, window.screen.height, 0, gl.RGBA, gl.FLOAT, null);
             gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, width, height, 0, gl.RGBA, gl.FLOAT, null);
             // Edit End
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
@@ -44,6 +43,7 @@ class FBO{
         // var GBufferNum = 5;
         // Edit End
         
+        //在JavaScript中，对象是动态的，可以随时添加属性和方法
 	    framebuffer.attachments = [];
 	    framebuffer.textures = []
 
