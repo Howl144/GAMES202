@@ -71,7 +71,7 @@ Vec3f IntegrateEmu(Vec3f V, float roughness, float NdotV, Vec3f Ei) {
 
 
 int main() {
-    unsigned char *Edata = stbi_load("./GGX_E_MC_LUT.png", &resolution, &resolution, &channel, 3);
+    unsigned char *Edata = stbi_load("./Emu_MC_LUT.png", &resolution, &resolution, &channel, 3);
     if (Edata == NULL) 
     {
 		std::cout << "ERROE_FILE_NOT_LOAD" << std::endl;
@@ -109,7 +109,7 @@ int main() {
 		}
 
 		stbi_flip_vertically_on_write(true);
-		stbi_write_png("GGX_Eavg_LUT.png", resolution, resolution, channel, data, 0);
+		stbi_write_png("Eavg_MC_LUT.png", resolution, resolution, channel, data, 0);
 	}
 	stbi_image_free(Edata);
     return 0;

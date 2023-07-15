@@ -113,7 +113,7 @@ int main() {
         }
     }
     stbi_flip_vertically_on_write(true);
-    stbi_write_png("GGX_E_LUT.png", resolution, resolution, 3, data, resolution * 3);
+    stbi_write_png("Emu_IS_LUT.png", resolution, resolution, 3, data, resolution * 3);
     
     std::cout << "Finished precomputed!" << std::endl;
     return 0;
