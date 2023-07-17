@@ -97,6 +97,30 @@ vec3 MultiScatterBRDF(float NdotL, float NdotV)
   
 }
 
+vec3 MultiScatterBRDF(float NdotL, float NdotV, vec3 F0)
+{
+  vec3 albedo = pow(texture2D(uAlbedoMap, vTextureCoord).rgb, vec3(2.2));
+
+  // A split-sum result in which R-channel repesent F0 interger term
+  vec3 E_o = texture2D(uBRDFLut, vec2(NdotL, uRoughness)).xyz;
+  vec3 E_i = texture2D(uBRDFLut, vec2(NdotV, uRoughness)).xyz;
+
+  // Split sum result add here.
+  vec3 Emu_o = F0 * E_o.x + vec3(1.0) * E_o.y;
+  vec3 Emu_i = F0 * E_i.x + vec3(1.0) * E_i.y;
+
+  vec3 E_avg = texture2D(uEavgLut, vec2(0, uRoughness)).xyz;
+  vec3 E_avgss = F0 * E_avg.x + vec3(1.0) * E_avg.y;
+  // copper
+  vec3 edgetint = vec3(0.827, 0.792, 0.678);
+  vec3 F_avg = AverageFresnel(albedo, edgetint);
+  
+  // TODO: To calculate fms and missing energy here
+  vec3 F_ms = (1.0 - Emu_o) * (1.0 - Emu_i) / (PI * (1.0 - E_avgss));
+  vec3 F_add = F_avg * E_avgss / (1.0 - F_avg * (1.0 - E_avgss));
+  return F_ms * F_add;
+}
+
 void main(void) {
   vec3 albedo = pow(texture2D(uAlbedoMap, vTextureCoord).rgb, vec3(2.2));
 
@@ -112,21 +136,24 @@ void main(void) {
   // calculate per-light radiance
   vec3 L = normalize(uLightDir);
   vec3 H = normalize(V + L);
-  float distance = length(uLightPos - vFragPos);
-  float attenuation = 1.0 / (distance * distance);
   vec3 radiance = uLightRadiance;
 
   float NDF = DistributionGGX(N, H, uRoughness);   
   float G   = GeometrySmith(N, V, L, uRoughness);
   vec3 F = fresnelSchlick(F0, V, H);
-      
+  
   vec3 numerator    = NDF * G * F; 
   float denominator = 4.0 * max(dot(N, V), 0.0) * max(dot(N, L), 0.0);
   vec3 Fmicro = numerator / max(denominator, 0.001); 
   
   float NdotL = max(dot(N, L), 0.0);        
 
+  //split sum
+  // vec3 Fms = MultiScatterBRDF(NdotL, NdotV,F0);
+  
+  //no split sum
   vec3 Fms = MultiScatterBRDF(NdotL, NdotV);
+  
   vec3 BRDF = Fmicro + Fms;
   
   Lo += BRDF * radiance * NdotL;
@@ -135,5 +162,4 @@ void main(void) {
   color = color / (color + vec3(1.0));
   color = pow(color, vec3(1.0/2.2)); 
   gl_FragColor = vec4(color, 1.0);
-
 }

@@ -1,4 +1,4 @@
-#include <iostream>
+﻿#include <iostream>
 #include <vector>
 #include <algorithm>
 #include <cmath>
@@ -67,11 +67,12 @@ float GeometrySmith(float roughness, float NoV, float NoL) {
     return ggx1 * ggx2;
 }
 
+
+
 Vec3f IntegrateBRDF(Vec3f V, float roughness) {
     const int sample_count = 1024;
-    // Edit Start
-    Vec3f Emu(0.0f);
-    // Edit End
+    float A = 0.0;
+    float B = 0.0;
     Vec3f N = Vec3f(0.0, 0.0, 1.0);
     for (int i = 0; i < sample_count; i++) {
         Vec2f Xi = Hammersley(i, sample_count);
@@ -82,26 +83,30 @@ Vec3f IntegrateBRDF(Vec3f V, float roughness) {
         float NoH = std::max(H.z, 0.0f);
         float VoH = std::max(dot(V, H), 0.0f);
         float NoV = std::max(dot(N, V), 0.0f);
+
         // Edit Start
         // TODO: To calculate (fr * ni) / p_o here - Bonus 1
+        float Fc = pow(1.0f - VoH, 5.0f);
         float G = GeometrySmith(roughness, NoV, NoL);
-        float weight = VoH * G / (NoV * NoH);
-        Emu += Vec3f(1.0, 1.0, 1.0) * weight;
-
-        // Split Sum - Bonus 2
-        // Edit End
+        float G_Vis  = VoH * G / (NoV * NoH);
+        
+        // //no split sum 
+        A += G_Vis;
+        
+        // // Split Sum - Bonus 2
+        // A += (1.0 - Fc) * G_Vis;
+        // B += Fc * G_Vis;
     }
-    // Edit Start
-    return Emu / sample_count;
-    // Edit End
+    return { A / sample_count, A / sample_count, A / sample_count }; // No split sum version
+    // return { A / sample_count, B / sample_count, 0.0 };  // Split sum
 }
 
 int main() {
     uint8_t data[resolution * resolution * 3];
     float step = 1.0 / resolution;
     for (int i = 0; i < resolution; i++) {
+        float roughness = step * (static_cast<float>(i) + 0.5f);
         for (int j = 0; j < resolution; j++) {
-            float roughness = step * (static_cast<float>(i) + 0.5f);
             float NdotV = step * (static_cast<float>(j) + 0.5f);
             Vec3f V = Vec3f(std::sqrt(1.f - NdotV * NdotV), 0.f, NdotV);
 

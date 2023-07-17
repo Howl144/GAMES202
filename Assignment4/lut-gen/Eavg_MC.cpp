@@ -1,4 +1,4 @@
-#include <iostream>
+﻿#include <iostream>
 #include <vector>
 #include <algorithm>
 #include <cmath>
@@ -57,13 +57,13 @@ samplePoints squareToCosineHemisphere(int sample_count){
     return samlpeList;
 }
 
-Vec3f getEmu(int x, int y, int alpha, unsigned char *data, float NdotV, float roughness) {
+Vec3f getEmu(int x, int y, unsigned char *data) {
     return Vec3f(data[3 * (resolution * x + y) + 0],
                  data[3 * (resolution * x + y) + 1],
                  data[3 * (resolution * x + y) + 2]);
 }
 
-Vec3f IntegrateEmu(Vec3f V, float roughness, float NdotV, Vec3f Ei) {
+Vec3f IntegrateEmu(float NdotV, Vec3f Ei) {
     // Edit Start
     return Ei * NdotV * 2.0f;
     // Edit End
@@ -94,9 +94,10 @@ int main() {
             {
                 float NdotV = step * (static_cast<float>(j) + 0.5f);
                 Vec3f V = Vec3f(std::sqrt(1.f - NdotV * NdotV), 0.f, NdotV);
-
-                Vec3f Ei = getEmu((resolution - 1 - i), j, 0, Edata, NdotV, roughness);
-                Eavg += IntegrateEmu(V, roughness, NdotV, Ei) * step;
+                //从左下角开始读取
+                Vec3f Ei = getEmu((resolution - 1 - i), j,Edata);
+                Eavg += IntegrateEmu(NdotV, Ei);
+                Eavg = Eavg * step;
                 setRGB(i, j, 0.0, data);
 			}
 

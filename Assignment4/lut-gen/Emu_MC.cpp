@@ -1,4 +1,4 @@
-#include <iostream>
+﻿#include <iostream>
 #include <vector>
 #include <algorithm>
 #include <cmath>
@@ -22,15 +22,15 @@ samplePoints squareToCosineHemisphere(int sample_count){
     samplePoints samlpeList;
     const int sample_side = static_cast<int>(floor(sqrt(sample_count)));
 
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_real_distribution<> rng(0.0, 1.0);
+    static std::random_device rd;
+    static std::mt19937 gen(rd());
+    static std::uniform_real_distribution<> rng(0.0, 1.0);
     for (int t = 0; t < sample_side; t++) {
         for (int p = 0; p < sample_side; p++) {
             double samplex = (t + rng(gen)) / sample_side;
             double sampley = (p + rng(gen)) / sample_side;
             
-            double theta = 0.5f * acos(1 - 2*samplex);
+            double theta = acos(std::sqrt(1 - samplex));
             double phi =  2 * PI * sampley;
             Vec3f wi = Vec3f(sin(theta) * cos(phi), sin(theta) * sin(phi), cos(theta));
             float pdf = wi.z / PI;
@@ -118,6 +118,7 @@ int main() {
             data[(i * resolution + j) * 3 + 2] = uint8_t(irr.z * 255.0);
         }
     }
+    //写入时翻转垂直方向的数据，使原点处于左下角
     stbi_flip_vertically_on_write(true);
     stbi_write_png("Emu_MC_LUT.png", resolution, resolution, 3, data, resolution * 3);
     

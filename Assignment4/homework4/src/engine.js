@@ -66,9 +66,16 @@ async function GAMES202Main() {
 	const directionLight = new DirectionalLight(lightRadiance, lightPos, lightDir, lightUp, renderer.gl);
 	renderer.addLight(directionLight);
 
+	//image path
+	let splitSumPath_Emu = 'assets/ball/split_sum/Emu_IS_LUT.png';
+	let splitSumPath_Eavg = 'assets/ball/split_sum/Eavg_IS_LUT.png';
+	let noSplitSumPath_Emu = 'assets/ball/no_split_sum/Emu_IS_LUT.png';
+	let noSplitSumPath_Eavg = 'assets/ball/no_split_sum/Eavg_IS_LUT.png';
+
+
 	// Add Sphere
 	let img = new Image(); // brdfLUT
-	img.src = 'assets/ball/GGX_E_LUT.png';
+	img.src = noSplitSumPath_Emu;
 	var loadImage = async img => {
 		return new Promise((resolve, reject) => {
 			img.onload = async () => {
@@ -82,7 +89,7 @@ async function GAMES202Main() {
 	brdflut.CreateImageTexture(gl, img);
 
 	let img1 = new Image(); // eavgLUT
-	img1.src = 'assets/ball/GGX_Eavg_LUT.png';
+	img1.src = noSplitSumPath_Eavg;
 	var loadImage = async img => {
 		return new Promise((resolve, reject) => {
 			img.onload = async () => {

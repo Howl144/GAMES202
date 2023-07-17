@@ -1,4 +1,4 @@
-#include <iostream>
+﻿#include <iostream>
 #include <vector>
 #include <algorithm>
 #include <cmath>
@@ -49,8 +49,29 @@ Vec3f ImportanceSampleGGX(Vec2f Xi, Vec3f N, float roughness) {
 }
 
 
-Vec3f IntegrateEmu(Vec3f V, float roughness, float NdotV, Vec3f Ei) {
+Vec3f IntegrateEmu(float NdotV, Vec3f Ei) {
     return Ei * NdotV * 2.0f;
+}
+
+Vec3f IntegrateEmu(Vec3f V, float roughness, float NdotV, Vec3f Ei) {
+    Vec3f Eavg = Vec3f(0.0f);
+    const int sample_count = 1024;
+    Vec3f N = Vec3f(0.0, 0.0, 1.0);
+    for (int i = 0; i < sample_count; i++) {
+        Vec2f Xi = Hammersley(i, sample_count);
+        Vec3f H = ImportanceSampleGGX(Xi, N, roughness);
+        Vec3f L = normalize(H * 2.0f * dot(V, H) - V);
+
+        float NoL = std::max(L.z, 0.0f);
+        float NoH = std::max(H.z, 0.0f);
+        float VoH = std::max(dot(V, H), 0.0f);
+        float NoV = std::max(dot(N, V), 0.0f);
+
+        // TODO: To calculate Eavg here
+        Eavg += Ei * NoL * 2.0f;
+
+    }
+    return Eavg / sample_count;
 }
 
 void setRGB(int x, int y, float alpha, unsigned char *data) {
@@ -65,7 +86,7 @@ void setRGB(int x, int y, Vec3f alpha, unsigned char *data) {
     data[3 * (resolution * x + y) + 2] = uint8_t(alpha.z);
 }
 
-Vec3f getEmu(int x, int y, int alpha, unsigned char *data, float NdotV, float roughness) {
+Vec3f getEmu(int x, int y, unsigned char *data) {
     return Vec3f(data[3 * (resolution * x + y) + 0],
                  data[3 * (resolution * x + y) + 1],
                  data[3 * (resolution * x + y) + 2]);
@@ -78,7 +99,7 @@ int main() {
 		std::cout << "ERROE_FILE_NOT_LOAD" << std::endl;
 		return -1;
 	}
-	else 
+	else
     {
 		std::cout << resolution << " " << resolution << " " << channel << std::endl;
         // | -----> mu(j)
@@ -95,11 +116,14 @@ int main() {
             {
                 float NdotV = step * (static_cast<float>(j) + 0.5f);
                 Vec3f V = Vec3f(std::sqrt(1.f - NdotV * NdotV), 0.f, NdotV);
-
-                Vec3f Ei = getEmu((resolution - 1 - i), j, 0, Edata, NdotV, roughness);
-                Eavg += IntegrateEmu(V, roughness, NdotV, Ei) * step;
+                //从左下角开始读取
+                Vec3f Ei = getEmu((resolution - 1 - i), j, Edata);
+                // Eavg += IntegrateEmu(NdotV, Ei);
+                Eavg += IntegrateEmu(V, roughness,NdotV, Ei);
                 setRGB(i, j, 0.0, data);
 			}
+            Eavg = Eavg * step;
+
 
             for(int k = 0; k < resolution; k++)
             {
