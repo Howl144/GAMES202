@@ -5,6 +5,9 @@ bin-release/
 [Bb]in/
 build/
 
+# example file
+examples/
+
 # Other files and folders
 .settings/
 .cache/

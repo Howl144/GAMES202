@@ -10,6 +10,7 @@ inline float SafeSqrt(const float &v) { return std::sqrt(std::max(v, 0.f)); }
 inline float SafeAcos(const float &v) {
     return std::acos(std::min(std::max(v, 0.f), 1.f));
 }
+inline float frac(float val) { return val - std::floor(val); }
 
 class Float3 {
   public:
@@ -76,12 +77,16 @@ inline Float3 SafeSqrt(const Float3 &a) {
     return Float3(SafeSqrt(a.x), SafeSqrt(a.y), SafeSqrt(a.z));
 }
 
-// (1 - s) * u + s * v
+// s * v + (1 - s) * u
 inline Float3 Lerp(const Float3 &u, const Float3 &v, const float &s) {
     return u + (v - u) * s;
 }
 inline Float3 Clamp(const Float3 &v, const Float3 &l, const Float3 &r) {
     return Min(Max(v, l), r);
+}
+
+inline float Clamp(const float v, const float l, const float r) {
+    return std::fmin(std::fmax(v, l), r);
 }
 
 inline float SqrLength(const Float3 &a) { return Sqr(a.x) + Sqr(a.y) + Sqr(a.z); }

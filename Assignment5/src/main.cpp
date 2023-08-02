@@ -1,6 +1,7 @@
 #include <fstream>
 #include <string>
-
+#include <filesystem>
+#include <chrono>
 #include "denoiser.h"
 #include "util/image.h"
 #include "util/mathutil.h"
@@ -39,11 +40,14 @@ FrameInfo LoadFrameInfo(const filesystem::path &inputDir, const int &idx) {
 
 void Denoise(const filesystem::path &inputDir, const filesystem::path &outputDir,
              const int &frameNum) {
-    Denoiser denoiser;
+    Denoiser_JBF denoiser_JBF;
+    Denoiser_SVGF denoiser_SVGF;
     for (int i = 0; i < frameNum; i++) {
         std::cout << "Frame: " << i << std::endl;
+        if (i == 22)
+            int i = 0;
         FrameInfo frameInfo = LoadFrameInfo(inputDir, i);
-        Buffer2D<Float3> image = denoiser.ProcessFrame(frameInfo);
+        Buffer2D<Float3> image = denoiser_SVGF.ProcessFrame(frameInfo);
         std::string filename =
             (outputDir / ("result_" + std::to_string(i) + ".exr")).str();
         WriteFloat3Image(image, filename);
@@ -51,18 +55,25 @@ void Denoise(const filesystem::path &inputDir, const filesystem::path &outputDir
 }
 
 int main() {
-    // Box
-    filesystem::path inputDir("examples/box/input");
-    filesystem::path outputDir("examples/box/output");
-    int frameNum = 20;
 
-    /*
+    //std::filesystem::path current_path = std::filesystem::current_path();
+    //std::cout << "currentSourcePath : " << current_path << std::endl;
+
+    //// Box
+    //filesystem::path inputDir("./Debug/examples/box/input");
+    //filesystem::path outputDir("./Debug/examples/box/output");
+    //int frameNum = 20;
+
+    
     // Pink room
-    filesystem::path inputDir("examples/pink-room/input");
-    filesystem::path outputDir("examples/pink-room/output");
+    filesystem::path inputDir("./Debug/examples/pink-room/input");
+    filesystem::path outputDir("./Debug/examples/pink-room/output");
     int frameNum = 80;
-    */
-
+    
+    auto start = std::chrono::high_resolution_clock::now();
     Denoise(inputDir, outputDir, frameNum);
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed = end - start;
+    std::cout << "Denoise函数的执行时间为： " << elapsed.count() << "秒.\n";
     return 0;
 }

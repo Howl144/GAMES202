@@ -16,7 +16,7 @@ Buffer2D<float> ReadFloatImageLayer(const std::string &filename,
 }
 
 Buffer2D<Float3> ReadFloat3Image(const std::string &filename) {
-    int width, height;
+    int width = 0, height = 0;
     float *_buffer = ReadImage(filename, width, height, 3);
     CHECK(_buffer != nullptr);
     Float3 *buffer = new Float3[width * height];
