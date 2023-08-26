@@ -6,11 +6,12 @@ class MeshRender {
 	#texcoordBuffer;
 	#indicesBuffer;
 
-	constructor(gl, mesh, material) {
+	constructor(gl, mesh, material,objMaterial=null) {
 
 		this.gl = gl;
 		this.mesh = mesh;
 		this.material = material;
+		this.materialName = objMaterial;
 
 		this.#vertexBuffer = gl.createBuffer();
 		this.#normalBuffer = gl.createBuffer();
@@ -153,6 +154,9 @@ class MeshRender {
 		let textureNum = 0;
 		for (let k in this.material.uniforms) {
 
+			if(k == "uSkybox")
+				var tmp = 0;
+
 			if (this.material.uniforms[k].type == 'matrix4fv') {
 				gl.uniformMatrix4fv(
 					this.shader.program.uniforms[k],
@@ -182,9 +186,15 @@ class MeshRender {
 				textureNum += 1;
 			} else if (this.material.uniforms[k].type == 'CubeTexture') {
 				gl.activeTexture(gl.TEXTURE0 + textureNum);
-				//console.log(cubeMap.texture)
-				gl.bindTexture(gl.TEXTURE_CUBE_MAP, cubeMaps[guiParams.envmapId].texture);
+				// getErrorMessage(gl,"meshRender.js");
+
+				if(this.material.uniforms[k].value == null){
+					gl.bindTexture(gl.TEXTURE_CUBE_MAP, cubeMaps[guiParams.envmapId].texture);
+				}else{
+					gl.bindTexture(gl.TEXTURE_CUBE_MAP, this.material.uniforms[k].value);
+				}
 				gl.uniform1i(this.shader.program.uniforms[k], textureNum);
+				// getErrorMessage(gl,"meshRender.js");
 				textureNum += 1;
 			}
 		}

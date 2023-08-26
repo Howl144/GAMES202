@@ -17,6 +17,7 @@ class WebGLRenderer {
     addMeshRender(mesh) { this.meshes.push(mesh); }
     addShadowMeshRender(mesh) { this.shadowMeshes.push(mesh); }
 
+
     render() {
         const gl = this.gl;
 
@@ -24,9 +25,10 @@ class WebGLRenderer {
         gl.clearDepth(1.0); // Clear everything
         gl.enable(gl.DEPTH_TEST); // Enable depth testing
         gl.depthFunc(gl.LEQUAL); // Near things obscure far things
+        gl.viewport(0,0,globalWidth,globalHeight);
 
         console.assert(this.lights.length != 0, "No light");
-        console.assert(this.lights.length == 1, "Multiple lights");
+        // console.assert(this.lights.length == 1, "Multiple lights");
 
         for (let l = 0; l < this.lights.length; l++) {
             // Draw light
@@ -36,11 +38,19 @@ class WebGLRenderer {
 
             // Camera pass
             for (let i = 0; i < this.meshes.length; i++) {
-                this.gl.useProgram(this.meshes[i].shader.program.glShaderProgram);
-                this.gl.uniform3fv(this.meshes[i].shader.program.uniforms.uLightPos, this.lights[l].entity.lightPos);
+                
+                if(this.meshes[i].materialName == "KullaContyMaterial" || this.meshes[i].materialName == "PBRMaterial"){
+                    let ID = this.meshes[i].shader.program.glShaderProgram;
+                    this.gl.useProgram(ID);
+                    gl.uniform3fv(gl.getUniformLocation(
+                        ID, "uLightPos" + "[" + l + "]"), 
+                        this.lights[l].entity.lightPos);
+                    gl.uniform3fv(gl.getUniformLocation(
+                        ID, "uLightColors" + "[" + l + "]"), 
+                        this.lights[l].entity.lightRadiance);
+                }
                 this.meshes[i].draw(this.camera);
             }
         }
-
     }
 }

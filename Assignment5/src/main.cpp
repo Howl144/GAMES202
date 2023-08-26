@@ -44,8 +44,6 @@ void Denoise(const filesystem::path &inputDir, const filesystem::path &outputDir
     Denoiser_SVGF denoiser_SVGF;
     for (int i = 0; i < frameNum; i++) {
         std::cout << "Frame: " << i << std::endl;
-        if (i == 22)
-            int i = 0;
         FrameInfo frameInfo = LoadFrameInfo(inputDir, i);
         Buffer2D<Float3> image = denoiser_SVGF.ProcessFrame(frameInfo);
         std::string filename =
@@ -74,6 +72,6 @@ int main() {
     Denoise(inputDir, outputDir, frameNum);
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> elapsed = end - start;
-    std::cout << "Denoiseº¯ÊýµÄÖ´ÐÐÊ±¼äÎª£º " << elapsed.count() << "Ãë.\n";
+    std::cout << "Denoiserçš„æ—¶é—´ä¸º:" << elapsed.count() << "ç§’ \n";
     return 0;
 }

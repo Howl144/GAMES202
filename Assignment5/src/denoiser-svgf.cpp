@@ -37,7 +37,7 @@ bool Denoiser_SVGF::loadPrevData(const int x,const int y,const int width,const i
     prevMoments = Float3(0, 0, 0);
     historyLength = 0.0;
     bool v[4] = {false};
-    // 由于没有Float2，这里暂时用Float3代替
+    //鐢变簬娌℃湁Float2锛岃繖閲屾殏鏃剁敤Float3浠ｆ浛
     const Float3 offset[4] = {Float3(0, 0, 0), Float3(1, 0, 0),
                               Float3(0, 1, 0), Float3(1, 1, 0)};
 
@@ -78,9 +78,9 @@ bool Denoiser_SVGF::loadPrevData(const int x,const int y,const int width,const i
     if (valid) {
         //float sumw = 0;
         //const float x =  frac(pre_screen_position.x);
-        //const float y = 1.0 - frac(pre_screen_position.y);
+        //const float y =  frac(pre_screen_position.y);
 
-        //// bilinear weights
+        ////bilinear weights
         //const float w[4] = {(1 - x) * (1 - y), x * (1 - y),
         //                    (1 - x) *  y     , x *  y};
 
@@ -91,7 +91,7 @@ bool Denoiser_SVGF::loadPrevData(const int x,const int y,const int width,const i
         //        continue;
         //    if (v[sampleIdx]) {
         //        prevIllumination += Float3(w[sampleIdx]) * m_preFrameInfo.m_beauty(loc.x, loc.y);
-        //        prevMoments += Float3(w[sampleIdx]) * m_hisFrameVariance(loc.x, loc.y);
+        //        prevMoments += Float3(w[sampleIdx]) * m_hisMoments(loc.x, loc.y);
         //        sumw += w[sampleIdx];
         //    }
         //}
@@ -102,14 +102,14 @@ bool Denoiser_SVGF::loadPrevData(const int x,const int y,const int width,const i
         //prevMoments = valid ? prevMoments / sumw : Float3(0, 0, 0);
 
         prevIllumination = m_preFrameInfo.m_beauty(pre_screen_position.x, pre_screen_position.y);
-        prevMoments = m_hisFrameVariance(pre_screen_position.x, pre_screen_position.y);
+        prevMoments = m_hisMoments(pre_screen_position.x, pre_screen_position.y);
     }
     
     if (!valid) // perform cross-bilateral filter in the hope to find some suitable
                 // samples somewhere
     {
         float nValid = 0.0;
-        const int radius = 4;
+        const int radius = 1;
         for (int yy = -radius; yy <= radius; yy++) {
             for (int xx = -radius; xx <= radius; xx++) {
                 const Float3 loc = pre_screen_position + Float3(xx, yy,0);
@@ -123,7 +123,7 @@ bool Denoiser_SVGF::loadPrevData(const int x,const int y,const int width,const i
                                  normal,preNormal, fwidthNormal,
                                  id, preMeshId)) {
                     prevIllumination += m_preFrameInfo.m_beauty(loc.x, loc.y);
-                    prevMoments += m_hisFrameVariance(loc.x, loc.y);
+                    prevMoments += m_hisMoments(loc.x, loc.y);
                     nValid += 1.0;
                 }
             }
@@ -197,7 +197,7 @@ void Denoiser_SVGF::Reprojection(const FrameInfo &frameInfo) {
             Float3 illumination = frameInfo.m_beauty(x, y);
             float historyLength;
             Float3 prevIllumination;
-            //由于没有Float2，这里暂时用Float3代替
+            //鐢变簬娌℃湁Float2锛岃繖閲屾殏鏃剁敤Float3浠ｆ浛
             Float3 prevMoments;
             bool success = loadPrevData(x, y,width,height, frameInfo,id,
                                         prevIllumination, prevMoments, historyLength,
@@ -241,7 +241,7 @@ void Denoiser_SVGF::Reprojection(const FrameInfo &frameInfo) {
     std::swap(m_tmpHisLength, m_historyLength);
 }
 
-void Denoiser_SVGF::TemporalAccumulation(const FrameInfo &frameInfo) {
+void Denoiser_SVGF::VarianceEstimation(const FrameInfo &frameInfo) {
     const int height = frameInfo.m_beauty.m_height;
     const int width = frameInfo.m_beauty.m_width;
     const int radius = 3;
@@ -334,7 +334,7 @@ float Denoiser_SVGF::depthWeight(const float center_depth, const float depth,
 float Denoiser_SVGF::luminanceWeight(const float center_lum, const float lum,
                                      const float variance) {
     const float eps = 1e-10;
-    return exp( (-std::fabs(center_lum - lum)) /
+    return std::exp( (-std::fabs(center_lum - lum)) /
                (m_phiColor * std::sqrt(std::fmax(0.0, variance) + eps)));
 }
 
@@ -350,7 +350,6 @@ float Denoiser_SVGF::computeVarianceCenter(const Float3& ipos,const int width,co
             p.x = std::fmin(std::fmax(p.x, 0.0), width - 1.0);
             p.y = std::fmin(std::fmax(p.y, 0.0), height - 1.0);
             const float k = kernel[std::abs(xx)][std::abs(yy)];
-            float tmp = m_curFrameVariance(p.x, p.y);
             sum += m_curFrameVariance(p.x,p.y) * k;
         }
     }
@@ -438,7 +437,7 @@ void Denoiser_SVGF::Init(const FrameInfo &frameInfo) {
     m_tmpColor = CreateBuffer2D<Float3>(width, height);
     m_curFrameVariance = CreateBuffer2D<float>(width, height);
     m_tmpCurFrameVar = CreateBuffer2D<float>(width, height);
-    m_hisFrameVariance = CreateBuffer2D<float>(width, height);
+    m_hisMoments = CreateBuffer2D<Float3>(width, height);
     m_moments = CreateBuffer2D<Float3>(width, height);
     m_historyLength = CreateBuffer2D<int>(width, height);
     m_tmpHisLength = CreateBuffer2D<int>(width, height);
@@ -447,14 +446,14 @@ void Denoiser_SVGF::Init(const FrameInfo &frameInfo) {
 void Denoiser_SVGF::Maintain(const FrameInfo &frameInfo) { 
     m_preFrameInfo = frameInfo; 
     m_preFrameInfo.m_beauty.Copy(m_accColor);
-    m_hisFrameVariance.Copy(m_curFrameVariance);
+    m_hisMoments.Copy(m_moments);
 }
 
 Buffer2D<Float3> Denoiser_SVGF::ProcessFrame(const FrameInfo &frameInfo) {
 
     /*
     Reproject:
-        - takes: frameInfo,m_preFrameInfo, m_hisFrameVariance, m_historyLength
+        - takes: frameInfo,m_preFrameInfo, m_hisMoments, m_historyLength
         returns: illumination,variance, moments, historyLength
     Variance/filter moments:
         - takes: frameInfo,m_accColor,m_moments, m_historyLength,
@@ -465,12 +464,12 @@ Buffer2D<Float3> Denoiser_SVGF::ProcessFrame(const FrameInfo &frameInfo) {
     */
      if (m_useTemportal) {
          Reprojection(frameInfo);
-         TemporalAccumulation(frameInfo);
+         VarianceEstimation(frameInfo);
      } else {
          Init(frameInfo);
          m_preFrameInfo = frameInfo;
          Reprojection(frameInfo);
-         TemporalAccumulation(frameInfo);
+         VarianceEstimation(frameInfo);
      }
 
     for (int i = 0; i < m_FilterIterations; i++) {

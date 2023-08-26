@@ -1,4 +1,4 @@
-function loadOBJ(renderer, path, name, objMaterial, transform, metallic=1.0, roughness=0.2) {
+function loadOBJ(renderer, path, name, objMaterial, transform, cubeMap=null,hdrObj=null,metallic=1.0, roughness=0.2) {
 
 	const manager = new THREE.LoadingManager();
 	manager.onProgress = function (item, loaded, total) {
@@ -39,7 +39,7 @@ function loadOBJ(renderer, path, name, objMaterial, transform, metallic=1.0, rou
 								null,
 								indices, transform);
 
-							let colorMap = new Texture();
+							let colorMap = new Texture(renderer.gl);
 							if (mat.map != null) {
 								colorMap.CreateImageTexture(renderer.gl, mat.map.image);
 							}
@@ -50,16 +50,10 @@ function loadOBJ(renderer, path, name, objMaterial, transform, metallic=1.0, rou
 
 							switch (objMaterial) {
 								case 'SkyBoxMaterial':
-									material = buildSkyBoxMaterial("./src/shaders/skyBoxShader/SkyBoxVertex.glsl", "./src/shaders/skyBoxShader/SkyBoxFragment.glsl");
+									material = buildSkyBoxMaterial(cubeMap,"./src/shaders/skyBoxShader/SkyBoxVertex.glsl", "./src/shaders/skyBoxShader/SkyBoxFragment.glsl");
 									break;
 								case 'EnvMapMaterial':
-									material = buildEnvMapMaterial("./src/shaders/envMapShader/EnvMapVertex.glsl", "./src/shaders/envMapShader/EnvMapFragment.glsl");
-									break;
-								case 'KullaContyMaterial':
-									material = buildKullaContyMaterial(colorMap, metallic, roughness, brdflut, eavglut, renderer.lights[0].entity,"./src/shaders/kullaContyShader/KullaContyVertex.glsl", "./src/shaders/kullaContyShader/KullaContyFragment.glsl");
-									break;
-								case 'PBRMaterial':
-									material = buildPBRMaterial(colorMap, metallic, roughness, brdflut, renderer.lights[0].entity,"./src/shaders/pbrShader/PBRVertex.glsl", "./src/shaders/pbrShader/PBRFragment.glsl");
+									material = buildEnvMapMaterial(hdrObj,"./src/shaders/envMapShader/EnvMapVertex.glsl", "./src/shaders/envMapShader/EnvMapFragment.glsl");
 									break;
 							}
 

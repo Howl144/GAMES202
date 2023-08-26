@@ -1,14 +1,10 @@
 class PointLight {
-    /**
-     * Creates an instance of PointLight.
-     * @param {float} lightIntensity  The intensity of the PointLight.
-     * @param {vec3f} lightColor The color of the PointLight.
-     * @memberof PointLight
-     */
-    constructor(lightIntensity, lightPos, hasShadowMap, gl) {
-        this.mesh = Mesh.cube(setTransform(0, 0, 0, 0.2, 0.2, 0.2, 0));
-        this.mat = new EmissiveMaterial(lightIntensity);
+    constructor(lightRadiance, lightPos, lightUp,gl,hasShadowMap=false) {
+        this.mesh = Mesh.cube(setTransform(0, 0, 0, 2, 2, 2, 0));
+        this.mat = new EmissiveMaterial(lightRadiance);
+        this.lightRadiance = lightRadiance;
         this.lightPos = lightPos;
+        this.lightUp = lightUp;
 
         this.hasShadowMap = hasShadowMap;
         this.fbo = new FBO(gl);

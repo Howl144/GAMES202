@@ -1,18 +1,18 @@
 class SkyBoxMaterial extends Material {
 
-    constructor(vertexShader, fragmentShader) {
+    constructor(cubeMap,vertexShader, fragmentShader) {
         super({
-            'skybox': { type: 'CubeTexture', value: null }
+            'uSkybox': { type: 'CubeTexture', value: cubeMap }
         }, [], vertexShader, fragmentShader, null);
     }
 }
 
-async function buildSkyBoxMaterial(vertexPath, fragmentPath) {
+async function buildSkyBoxMaterial(cubeMap,vertexPath, fragmentPath) {
     
 
     let vertexShader = await getShaderString(vertexPath);
     let fragmentShader = await getShaderString(fragmentPath);
 
-    return new SkyBoxMaterial(vertexShader, fragmentShader);
+    return new SkyBoxMaterial(cubeMap,vertexShader, fragmentShader);
 
 }

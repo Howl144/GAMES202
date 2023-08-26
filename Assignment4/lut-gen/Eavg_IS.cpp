@@ -5,6 +5,7 @@
 #include <sstream>
 #include <fstream>
 #include "vec.h"
+#include <filesystem>
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
@@ -14,6 +15,7 @@
 
 int resolution = 128;
 int channel = 3;
+const float InvPI = 0.31830988618f;
 
 Vec2f Hammersley(uint32_t i, uint32_t N) {
     uint32_t bits = (i << 16u) | (i >> 16u);
@@ -23,6 +25,20 @@ Vec2f Hammersley(uint32_t i, uint32_t N) {
     bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
     float rdi = float(bits) * 2.3283064365386963e-10;
     return {float(i) / float(N), rdi};
+}
+
+float DistributionGGX(Vec3f N, Vec3f H, float roughness)
+{
+    float a = roughness*roughness;
+    float a2 = a*a;
+    float NdotH = std::fmax(dot(N, H), 0.0);
+    float NdotH2 = NdotH*NdotH;
+
+    float nom   = a2;
+    float denom = std::fmax((NdotH2 * (a2 - 1.0) + 1.0),1e-7);
+    denom = PI * denom * denom;
+
+    return nom / denom;
 }
 
 Vec3f ImportanceSampleGGX(Vec2f Xi, Vec3f N, float roughness) {
@@ -48,11 +64,6 @@ Vec3f ImportanceSampleGGX(Vec2f Xi, Vec3f N, float roughness) {
     return normalize(sampleVec);
 }
 
-
-Vec3f IntegrateEmu(float NdotV, Vec3f Ei) {
-    return Ei * NdotV * 2.0f;
-}
-
 Vec3f IntegrateEmu(Vec3f V, float roughness, float NdotV, Vec3f Ei) {
     Vec3f Eavg = Vec3f(0.0f);
     const int sample_count = 1024;
@@ -66,9 +77,10 @@ Vec3f IntegrateEmu(Vec3f V, float roughness, float NdotV, Vec3f Ei) {
         float NoH = std::max(H.z, 0.0f);
         float VoH = std::max(dot(V, H), 0.0f);
         float NoV = std::max(dot(N, V), 0.0f);
-
+        // float pdf = 1;跟roughness没关系
         // TODO: To calculate Eavg here
-        Eavg += Ei * NoL * 2.0f;
+        Eavg +=  Ei * 2.0f * NoL ;//Ei * 2.0f * NoL, NoL : cos thetai
+        
 
     }
     return Eavg / sample_count;
@@ -81,9 +93,12 @@ void setRGB(int x, int y, float alpha, unsigned char *data) {
 }
 
 void setRGB(int x, int y, Vec3f alpha, unsigned char *data) {
-	data[3 * (resolution * x + y) + 0] = uint8_t(alpha.x);
-    data[3 * (resolution * x + y) + 1] = uint8_t(alpha.y);
-    data[3 * (resolution * x + y) + 2] = uint8_t(alpha.z);
+    int tmp = 0;
+    if(alpha.x > 255)
+        alpha.x = 255;
+	data[3 * (resolution * x + y) + 0] = tmp = uint8_t(alpha.x);
+    data[3 * (resolution * x + y) + 1] = tmp = uint8_t(alpha.y);
+    data[3 * (resolution * x + y) + 2] = tmp = uint8_t(alpha.z);
 }
 
 Vec3f getEmu(int x, int y, unsigned char *data) {
@@ -93,6 +108,9 @@ Vec3f getEmu(int x, int y, unsigned char *data) {
 }
 
 int main() {
+    // std::filesystem::path current_path = std::filesystem::current_path();
+    // std::cout << "currentSourcePath : " << current_path << std::endl;
+
     unsigned char *Edata = stbi_load("./Emu_IS_LUT.png", &resolution, &resolution, &channel, 3);
     if (Edata == NULL) 
     {
@@ -118,12 +136,10 @@ int main() {
                 Vec3f V = Vec3f(std::sqrt(1.f - NdotV * NdotV), 0.f, NdotV);
                 //从左下角开始读取
                 Vec3f Ei = getEmu((resolution - 1 - i), j, Edata);
-                // Eavg += IntegrateEmu(NdotV, Ei);
                 Eavg += IntegrateEmu(V, roughness,NdotV, Ei);
                 setRGB(i, j, 0.0, data);
 			}
             Eavg = Eavg * step;
-
 
             for(int k = 0; k < resolution; k++)
             {
@@ -132,6 +148,7 @@ int main() {
 
             Eavg = Vec3f(0.0);
 		}
+        //从左上角开始写入，竖直方向需要翻转
 		stbi_flip_vertically_on_write(true);
 		stbi_write_png("Eavg_IS_LUT.png", resolution, resolution, channel, data, 0);
 	}

@@ -1,18 +1,18 @@
 class EnvMapMaterial extends Material {
     
-    constructor(cubeMap, vertexShader, fragmentShader) {
+    constructor(hdrObj,vertexShader, fragmentShader) {
         super({
-            'uCubeTexture': { type: 'CubeTexture', value: cubeMap }
+            'uEquirectangularMap': { type: 'texture', value: hdrObj }
         }, [], vertexShader, fragmentShader, null);
     }
 }
 
-async function buildEnvMapMaterial(cubeMap, vertexPath, fragmentPath) {
+async function buildEnvMapMaterial(hdrObj,vertexPath, fragmentPath) {
 
 
     let vertexShader = await getShaderString(vertexPath);
     let fragmentShader = await getShaderString(fragmentPath);
 
-    return new EnvMapMaterial(cubeMap, vertexShader, fragmentShader);
+    return new EnvMapMaterial(hdrObj,vertexShader, fragmentShader);
 
 }

@@ -1,7 +1,9 @@
 class Texture {
-    constructor() {}
-    CreateImageTexture(gl, image) {
+    constructor(gl) {
         this.texture = gl.createTexture();
+    }
+    CreateImageTexture(gl, image) {
+        
         gl.bindTexture(gl.TEXTURE_2D, this.texture);
 
         // Because images have to be download over the internet
@@ -32,7 +34,6 @@ class Texture {
     }
 
     CreateConstantTexture(gl, buffer) {
-        this.texture = gl.createTexture();
         gl.bindTexture(gl.TEXTURE_2D, this.texture);
 
         // Because images have to be download over the internet

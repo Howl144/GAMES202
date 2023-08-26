@@ -1,23 +1,22 @@
-attribute vec3 aVertexPosition;
-attribute vec3 aNormalPosition;
-attribute vec2 aTextureCoord;
+#version  300 es
 
-uniform mat4 uModelMatrix;
-uniform mat4 uViewMatrix;
+layout (location = 0) in vec3 aVertexPosition;
+layout (location = 1) in vec3 aNormalPosition;
+layout (location = 2) in vec2 aTextureCoord;
+
+out vec2 vTexCoords;
+out vec3 vWorldPos;
+out vec3 vNormal;
+
 uniform mat4 uProjectionMatrix;
+uniform mat4 uViewMatrix;
+uniform mat4 uModelMatrix;
 
-varying highp vec2 vTextureCoord;
-varying highp vec3 vFragPos;
-varying highp vec3 vNormal;
+void main()
+{
+    vTexCoords = aTextureCoord;
+    vWorldPos = vec3(uModelMatrix * vec4(aVertexPosition, 1.0));
+    vNormal = transpose(inverse(mat3(uModelMatrix))) * aNormalPosition;   
 
-
-void main(void) {
-
-  vFragPos = (uModelMatrix * vec4(aVertexPosition, 1.0)).xyz;
-  vNormal = (uModelMatrix * vec4(aNormalPosition, 0.0)).xyz;
-
-  gl_Position = uProjectionMatrix * uViewMatrix * uModelMatrix * vec4(aVertexPosition, 1.0);
-
-  vTextureCoord = aTextureCoord;
-
+    gl_Position =  uProjectionMatrix * uViewMatrix * vec4(vWorldPos, 1.0);
 }

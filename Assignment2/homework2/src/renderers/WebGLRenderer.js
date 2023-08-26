@@ -51,7 +51,7 @@ class WebGLRenderer {
 
                     let cameraModelMatrix = mat4.create();
                     // Edit Start
-                    mat4.fromRotation(cameraModelMatrix, timer * 5, [0, 1, 0]);
+                    // mat4.fromRotation(cameraModelMatrix, timer * 5, [0, 1, 0]);
                     // Edit End
 
                     if (k == 'uMoveWithCamera') { // The rotation of the skybox

@@ -32,20 +32,20 @@ class Denoiser_JBF {
     float m_alpha = 0.2f;
     float m_sigmaPlane = 0.1f;
     //box
-    float m_sigmaColor = 0.6f;
+    // float m_sigmaColor = 0.6f;
     //pink room
-    //float m_sigmaColor = 10.0f;
+    float m_sigmaColor = 10.0f;
     float m_sigmaNormal = 0.1f;
     float m_sigmaCoord = 32.0f;
     float m_colorBoxK = 1.0f;
 
  public:
     FrameInfo m_preFrameInfo;
-    // 存储结果的buffer
+    // 瀛樺偍缁撴灉鐨刡uffer
     Buffer2D<Float3> m_accColor;
-    // 临时存储结果的buffer
+    // 涓存椂瀛樺偍缁撴灉鐨刡uffer
     Buffer2D<Float3> m_misc;
-    // back projection 是否有效的buffer
+    // back projection 鏄惁鏈夋晥鐨刡uffer
     Buffer2D<bool> m_valid;
     bool m_useTemportal = false;
 };
@@ -55,7 +55,7 @@ public:
     Denoiser_SVGF(){};
     void Maintain(const FrameInfo &frameInfo);
     void Reprojection(const FrameInfo &frameInfo);
-    void TemporalAccumulation(const FrameInfo &frameInfo);
+    void VarianceEstimation(const FrameInfo &frameInfo);
     Buffer2D<Float3> ProcessFrame(const FrameInfo &frameInfo);
     void Init(const FrameInfo &frameInfo);
     bool isReprjValid(const float depth,const float preDepth,const float fwidthZ,
@@ -72,7 +72,7 @@ public:
     float depthWeight(const float center_depth,const float depth,
                     const float dgrad,
                     const float offset_x,const float offset_y);
-    float luminanceWeight(const float const center_lum,const float lum,const float variance);
+    float luminanceWeight(const float center_lum,const float lum,const float variance);
 public:
     float m_phiNormal = 128.0;
     float m_phiDepth = 1.0;
@@ -87,14 +87,15 @@ public:
 
     Buffer2D<float> m_curFrameVariance;
     Buffer2D<float> m_tmpCurFrameVar;
-    Buffer2D<float> m_hisFrameVariance;
 
     Buffer2D<int> m_historyLength;
     Buffer2D<int> m_tmpHisLength;
     
     Buffer2D<Float3> m_moments;
-    // 存储结果的buffer
+    Buffer2D<Float3> m_hisMoments;
+    // 瀛樺偍缁撴灉鐨刡uffer
     Buffer2D<Float3> m_accColor;
-    // 临时存储结果的buffer
+    // 涓存椂瀛樺偍缁撴灉鐨刡uffer
     Buffer2D<Float3> m_tmpColor;
+
 };

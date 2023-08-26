@@ -1,4 +1,4 @@
-function loadGLTF(renderer, path, name, objMaterial, transform, metallic=1.0, roughness=0.2){
+function loadGLTF(renderer, path, name, objMaterial, transform,irradianceMap,prefilterMap,pbrBrdfLut, metallic=1.0, roughness=0.2){
 	const manager = new THREE.LoadingManager();
 	manager.onProgress = function (item, loaded, total) {
 		console.log(item, loaded, total);
@@ -31,27 +31,28 @@ function loadGLTF(renderer, path, name, objMaterial, transform, metallic=1.0, ro
 						{ name: 'aTextureCoord', array: geo.attributes.uv.array },
 						geo.index.array, transform);
 
-					let colorMap = new Texture();
+					let colorMap = new Texture(renderer.gl);
 					if (mat.map != null) {
 						colorMap.CreateImageTexture(renderer.gl, mat.map.image);
 					}
 					else {
-						let kd = [0.7216, 0.451, 0.2]; // copper
+						let kd = [0.94423,0.77611,0.37217]; //albedo
 						colorMap.CreateConstantTexture(renderer.gl, kd, true);
 					}
 					
 					let material;
+
 					switch (objMaterial) {
 						case 'KullaContyMaterial':
-							material = buildKullaContyMaterial(colorMap, metallic, roughness, brdflut, eavglut,renderer.lights[0].entity,"./src/shaders/kullaContyShader/KullaContyVertex.glsl", "./src/shaders/kullaContyShader/KullaContyFragment.glsl");
+							material = buildKullaContyMaterial(colorMap,metallic,roughness,irradianceMap,prefilterMap,pbrBrdfLut,kullaContyBrdflut,kullaContyEavglut,"./src/shaders/kullaContyShader/KullaContyVertex.glsl", "./src/shaders/kullaContyShader/KullaContyFragment.glsl");
 							break;
 						case 'PBRMaterial':
-							material = buildPBRMaterial(colorMap, metallic, roughness, brdflut, renderer.lights[0].entity,"./src/shaders/pbrShader/PBRVertex.glsl", "./src/shaders/pbrShader/PBRFragment.glsl");
+							material = buildPBRMaterial(colorMap,metallic,roughness,irradianceMap,prefilterMap,pbrBrdfLut,"./src/shaders/pbrShader/PBRVertex.glsl", "./src/shaders/pbrShader/PBRFragment.glsl");
 							break;
 					}
 
 					material.then((data) => {
-						let meshRender = new MeshRender(renderer.gl, mesh, data);
+						let meshRender = new MeshRender(renderer.gl, mesh, data,objMaterial);
 						renderer.addMeshRender(meshRender);
 					});
 				}

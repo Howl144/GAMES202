@@ -170,7 +170,7 @@ Buffer2D<Float3> Denoiser_JBF::ATrousWaveletFilter(const FrameInfo &frameInfo) {
             Float3 final_color;
             auto total_weight = .0f;
 
-            int passes = 6;
+            int passes = 5;
             for (int pass = 0; pass < passes; pass++) {
 
                 for (int filterX = -2; filterX <= 2; filterX++) {

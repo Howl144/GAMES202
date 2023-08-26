@@ -2,12 +2,10 @@
 precision mediump float;
 #endif
 
-uniform samplerCube skybox;
+uniform samplerCube uSkybox;
 
-varying highp vec2 vTextureCoord;
 varying highp vec3 vFragPos;
-varying highp vec3 vNormal;
 
 void main() {
-     gl_FragColor = textureCube(skybox, vFragPos);
+     gl_FragColor = textureCube(uSkybox, vFragPos);
 }
