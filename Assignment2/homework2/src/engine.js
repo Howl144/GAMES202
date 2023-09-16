@@ -14,7 +14,7 @@ var envmap = [
 ];
 
 var guiParams = {
-	envmapId: 0
+	envmapId: 7
 }
 
 var cubeMaps = [];

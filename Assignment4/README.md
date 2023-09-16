@@ -1,5 +1,5 @@
-
 # 最终效果图  
+
 每组下面一排球是没用`Kulla Conty`的对照组，所有球的金属度都为`1`,粗糙度最小`0.05`，最大`0.95`,可以明显看到对照组随着粗糙度增大，会越来越暗，而使用了`Kulla Conty`的实验组，亮度不会随着粗糙度的增加而衰减，为了使现象更明显这里吧`HDR tonemapping`功能禁用了！
 ![0](./README_IMG/result.png)  
 下面是金材质的`Kulla-Conty Approximation`效果：  
@@ -235,20 +235,22 @@ IBL的实现流程如下：
 	await integral();
 ```
 主要就是加载`HDR`文件，将`HDR`的内容载入一张`2D纹理`中(hdrObj)，然后根据纹理生成`environmentCubemap`(envCubemap),然后根据`Cubemap`预计算漫反射项(irradianceMap)的光照部分，镜面反射项的光照部分(prefilterMap)以及对BRDF本身的预计算(pbrBrdfLutObj)，然后在shader中直接查表完成环境光`Cook-Torrance`反射模型的积分。  
-注意`gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE,new Uint8Array(data));`这个函数读取数据的类型不能像`Opengl`那样填`gl.FLOAT`,不然会报错,可以用这个函数来检测`getErrorMessage()`。反正我这是不行，你们可以自行测试。  
+注意`gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE,new Uint8Array(data));`这个函数读取数据的类型不能像`Opengl`那样填`gl.FLOAT`,不然会报错,可以用这个函数来检测`getErrorMessage()`。如果非得使用`gl.Float`可以像作业三那样添加`gl.getExtension('EXT_color_buffer_float')`扩展。  
 
 ## 从等距柱状投影到立方体贴图 
 
 `HDR`文件载入`2D纹理`后就是`等距柱状投影图(Equirectangular Map)`,我们要做的就是将这张`2D纹理`转换成`Cubemap`。  
 这里用[UV mapping](https://en.wikipedia.org/wiki/UV_mapping)中的技术,从球面上找到UV坐标。从`笛卡尔坐标系`转`球坐标系`然后映射到`[0,1]`区间去采样等距柱状图，在右手坐标系进行，`phi`逆时针旋转。公式如下：  
 $$
+\begin{align}
 u=0.5+\frac{\arctan(p_{z},p_{x})}{2\pi}  \\
 v=0.5+\frac{\arcsin(p_{y})}{\pi}  \tag{1}
+\end{align}
 $$
 解释如下：  
 ![2](./README_IMG/uv-mapping.png)
 代码如下:  
-``` cpp
+```cpp
 const vec2 invAtan = vec2(0.1591, 0.3183);
 // hdr文件存储每个浮点值的方式
 // 每个通道存储 8 位，再以 alpha 通道存放指数
@@ -272,7 +274,7 @@ void main()
     vec3 deCodeColor = hdrDecode(enCodeColor);
     fragColor = vec4(vec3(deCodeColor), 1.0);
 }
-```  
+```
 
 ## 环境光Cook-Torrance反射方程的预计算  
 
@@ -298,14 +300,16 @@ $$
 ![3](./README_IMG/irradiance.png)  
 反射方程的积分`∫`是围绕立体角`dw`旋转，而这个立体角相当难以处理。为了避免对难处理的立体角求积分，我们使用球坐标`θ`和`ϕ`来代替立体角。公式如下：  
 $$
+\begin{align}
 L_{o}(p,\phi_{o},\theta_{o})=kd\frac{c}{\pi}\int_{\phi=0}^{2\pi}\int_{\theta=0}^{\frac{1}{2}\pi}L_{i}(p,\phi_{i},\theta_{i})\cos(\theta_{i})\sin(\theta_{i})d\theta d\phi\\
 =kd\frac{c}{\pi}\frac{2\pi}{n1}\frac{\pi}{2\cdot n2}\sum_{m=0}^{n1}\sum_{n=0}^{n2}L_{i}(p,\phi_{m},\theta_{n})\cos(\theta_{n})\sin(\theta_{n})\\
 =kd\frac{c\pi}{n1\cdot n2}\sum_{m=0}^{n1}\sum_{n=0}^{n2}L_{i}(p,\phi_{m},\theta_{n})\cos(\theta_{n})\sin(\theta_{n}) \tag{5}
+\end{align}
 $$
 该结果由蒙特卡洛积分所得，`φ`的概率密度为`1/2PI`，`θ`的概率密度为`2/PI`，其中添加的`sin(θ)`是为了权衡较高半球区域的较小采样区域的贡献度如图：  
 ![4](./README_IMG/image.png)  
 给定每个片段的积分球坐标，对半球进行离散采样，过程代码如下：  
-``` cpp
+```cpp
 const float PI = 3.14159265359;
 void main()
 {		
@@ -345,9 +349,11 @@ L_{o}(p,w_{o})=\int_{\Omega}(\frac{DFG}{4(w_{o}\cdot n)(w_{i}\cdot n)})L_{i}(p,w
 $$
 对这部分积分进行预计算有个棘手的地方，它不仅依赖`wi`还依赖`wo`，我们不可能吧`wi`和`wo`的每种组合都进行预计算(wi(θ，φ),wo(θ，φ),F0,roughness,一共六个维度也无法预计算)，所以`Epic Games`提出了一个新的解决方法[split sum](http://blog.selfshadow.com/publications/s2013-shading-course/karis/s2013_pbs_epic_notes_v2.pdf)：  
 $$
-\int_{\Omega}(\frac{DFG}{4(w_{o}\cdot n)(w_{i}\cdot n)})L_{i}(p,w_{i})n\cdot w_{i}dw_{i} \\
-\approx\frac{1}{N}\sum_{k=1}^{N}\frac{L_{i}(p,w_{ik})f_{r}(p,w_{ik},w_{ok})\cos(\theta_{ik})}{p(w_{ik},w_{ok})} \\
+\begin{align}
+\int_{\Omega}(\frac{DFG}{4(w_{o}\cdot n)(w_{i}\cdot n)})L_{i}(p,w_{i})n\cdot w_{i}dw_{i}\\
+\approx\frac{1}{N}\sum_{k=1}^{N}\frac{L_{i}(p,w_{ik})f_{r}(p,w_{ik},w_{ok})\cos(\theta_{ik})}{p(w_{ik},w_{ok})}\\
 \approx(\frac{1}{N}\sum_{k=1}^{N}L_{i}(p,w_{ik}))(\frac{1}{N}\sum_{k=1}^{N}\frac{f_{r}(p,w_{ik},w_{ok})\cos(\theta_{ik})}{p(w_{ik},w_{ok})}) \tag{7}
+\end{align}
 $$
 该式子左边是一个求和，右边是蒙特卡洛积分，左右分别为两维度，可以直接查表。左边wi是两维度好理解，右边两维度我在后面章节解释。我们分别对这两部分进行预计算就可以解决上面棘手的部分。  
 但是它们都是建立在`GGX重要性采样`的基础上，先介绍一下重要性采样：  
@@ -366,30 +372,38 @@ p_{h}(\theta,\phi)=\frac{\alpha^{2}\cos(\theta)\sin(\theta)}{\pi((\alpha^{2}-1)\
 $$
 分别求θ和φ的边缘概率密度函数(pdf)：
 $$
+\begin{align}
 p_{h}(\theta)=\int_{0}^{2\pi}p_{h}(\theta,\phi)d\phi=\frac{2\alpha^{2}\cos(\theta)\sin(\theta)}{((\alpha^{2}-1)\cos^{2}(\theta)+1)^{2}} \tag{9}
+\end{align}
 $$
 $$
-p_{h}(\phi)=\int_{0}^{\frac{\pi}{2}}\frac{\alpha^{2}\cos(\theta)\sin(\theta)}{\pi((\alpha^2-1)\cos^{2}(\theta)+1)^{2}}d\theta \\
-=-\frac{\alpha^{2}}{2\pi}\int_{0}^{\frac{\pi}{2}}\frac{-2\cos(\theta)\sin(\theta)}{((\alpha^2-1)\cos^{2}(\theta)+1)^{2}}d\theta \\
-=\frac{\alpha^{2}}{2\pi}\int_{\frac{\pi}{2}}^{0}\frac{1}{((\alpha^2-1)\cos^{2}(\theta)+1)^{2}}d(\cos^{2}\theta) \\
-=\frac{\alpha^{2}}{2\pi}\int_{0}^{1}\frac{1}{((\alpha^{2}-1)t+1)^{2}}dt \\
+\begin{align}
+p_{h}(\phi)=\int_{0}^{\frac{\pi}{2}}\frac{\alpha^{2}\cos(\theta)\sin(\theta)}{\pi((\alpha^2-1)\cos^{2}(\theta)+1)^{2}}d\theta\\
+=-\frac{\alpha^{2}}{2\pi}\int_{0}^{\frac{\pi}{2}}\frac{-2\cos(\theta)\sin(\theta)}{((\alpha^2-1)\cos^{2}(\theta)+1)^{2}}d\theta\\
+=\frac{\alpha^{2}}{2\pi}\int_{\frac{\pi}{2}}^{0}\frac{1}{((\alpha^2-1)\cos^{2}(\theta)+1)^{2}}d(\cos^{2}\theta)\\
+=\frac{\alpha^{2}}{2\pi}\int_{0}^{1}\frac{1}{((\alpha^{2}-1)t+1)^{2}}dt\\
+\end{align}
 $$
 令`x=(α^2-1)t+1`
 $$
+\begin{align}
 =\frac{\alpha^{2}}{2\pi(\alpha^2-1)}\int_{1}^{\alpha^2}\frac{1}{x^{2}}dx \\
 =\frac{\alpha^{2}}{2\pi(1-\alpha^2)}\frac{1}{x}\vert_{1}^{\alpha^2} \\
 =\frac{1}{2\pi} \tag{10}
+\end{align}
 $$
 再分别求`θ`和`φ`的累计分布函数(cdf):
 $$
 P_{h}(\phi)=\int_{0}^{\phi}\frac{1}{2\pi}dt=\frac{\phi}{2\pi} \tag{11}
 $$
 $$
+\begin{align}
 P_{h}(\theta)=\int_{0}^{\theta}\frac{2\alpha^{2}\cos(t)\sin(t)}{((\alpha^{2}-1)\cos^{2}(t)+1)^{2}}dt \\
-=\alpha^{2}\int_{\theta}^{0}\frac{1}{(\alpha^2-1)\cos^{2}(t)+1)^{2}}d(\cos^{2}(t)) \\
+=\alpha^{2}\int_{\theta}^{0}\frac{1}{((\alpha^2-1)\cos^{2}(t)+1)^{2}}d(\cos^{2}(t)) \\
 =\frac{\alpha^2}{\alpha^2-1}\int_{\alpha^2}^{(\alpha^2-1)\cos^{2}(\theta)+1}-\frac{1}{x^{2}}dx \\
 =\frac{\alpha^2}{\alpha^2-1}\frac{1}{x}\vert_{\alpha^{2}}^{(\alpha^2-1)\cos^{2}(\theta)+1} \\
 =\frac{\alpha^{2}}{\alpha^{2}-1}\cdot (\frac{1}{(\alpha^2-1)\cos^{2}(\theta)+1}-\frac{1}{\alpha^{2}}) \tag{12}
+\end{align}
 $$
 反函数就是函数值域`Y`和定义域`X`的映射关系翻转一下。
 均匀的从`U[0,1]`中取出两个随机数$X_{1}$和$X_{2}$,则我们要的采样`θ`和`φ`为：  
@@ -473,9 +487,11 @@ p_{o}(\theta,\phi)=p_{h}(\theta,\phi)\cdot\lVert\frac{\partial w_{h}}{\partial w
 $$
 ![8](./README_IMG/pdf-derivation.png)  
 $$
+\begin{align}
 \lVert\frac{\partial w_{h}}{\partial w_{o}}\rVert=\frac{\vert o\cdot h\vert}{\lVert\vec{h}\rVert^{2}} \\
 =\frac{\vert o\cdot h\vert}{\lVert 2(o\cdot h)h\rVert^{2}}
 =\frac{\vert o\cdot h\vert}{4(o\cdot h)^{2}\lVert h\rVert^{2}}=\frac{1}{4\vert o\cdot h\vert} \tag{17}
+\end{align}
 $$
 其中`i`，`o`和`没箭头的h`，都是归一化后的向量。这只是反射模型的`pdf`，以同样的计算方法论文作者还给出了折射的`pdf`，感兴趣可以去看下。需要注意的是这里推导涉及的i，o和代码中的v，L没关系，只是单纯用来推导的,一般来说我们视`i`为光照方向，`o`为视角方向。
 
@@ -530,15 +546,19 @@ $$
 $$
 上文说到镜面反射方程有六个维度`wi(θ，φ)`,`wo(θ，φ)`,`F0`,`roughness`,由于光照部分我们已经处理过了，而此时`BRDF`的`wi`和`wo`都是和`n`绑定在一起的，那这里`BRDF`就只剩下`4`个维度`wi·n`,`wo·n`,`F0`,`roughness`,由于重要性采样可以由`wo`生成服从`D(h)dot(n,h)`概率密度函数的`wi`，则维度可以再降到3个`wo·n`,`F0`,`roughness`，再将`Fresnel`项拆分成两部分，`F0`也可以移出积分范围，维度再降到2个`wo·n`,`roughness`，这样就可以愉快的打表了😆！下面是拆分过程，我这里把`k`角标去掉了方便观看：  
 $$
+\begin{align}
 \frac{1}{N}\sum_{k=1}^{N}\frac{f_{r}(p,w_{i},w_{o})\cos(\theta_{i})}{p(w_{i},w_{o})} \\
 =\frac{1}{N}\sum_{k=1}^{N}\frac{f_{r}(p,w_{i},w_{o})F(w_{o},h)\cos(\theta_{i})}{F(w_{o},h)p(w_{i},w_{o})} \\
 =\frac{1}{N}\sum_{k=1}^{N}\frac{f_{r}(p,w_{i},w_{o})}{F(w_{o},h)p(w_{i},w_{o})}(F0+(1-F0)(1-w_{o}\cdot h)^{5})\cos(\theta_{i})
+\end{align}
 $$
 这里用`α`代替`(1-wo·h)^5`:  
 $$
+\begin{align}
 =\frac{1}{N}\sum_{k=1}^{N}\frac{f_{r}(p,w_{i},w_{o})}{F(w_{o},h)p(w_{i},w_{o})}(F0+(1-F0)\alpha)\cos(\theta_{i}) \\
 =\frac{1}{N}\sum_{k=1}^{N}\frac{f_{r}(p,w_{i},w_{o})}{F(w_{o},h)p(w_{i},w_{o})}(F0*(1-\alpha)+\alpha)\cos(\theta_{i}) \\
 =\frac{1}{N}\sum_{k=1}^{N}\frac{f_{r}(p,w_{i},w_{o})}{F(w_{o},h)p(w_{i},w_{o})}F0*(1-\alpha)\cos(\theta_{i})+\frac{1}{N}\sum_{k=1}^{N}\frac{f_{r}(p,w_{i},w_{o})}{F(w_{o},h)p(w_{i},w_{o})}\alpha\cos(\theta_{i}) \tag{22}
+\end{align}
 $$
 可以看到这两部分都包含一个共同项：  
 $$
@@ -546,8 +566,10 @@ $$
 $$
 我们将其化简一下,其中`pdf=D * NdotH / (4.0 * VdotH)`：  
 $$
+\begin{align}
 =\frac{DG\cos(\theta_{i})}{4\cos(\theta_{o})\cos(\theta_{i})}\frac{4(o\cdot h)}{D(n\cdot h)} \\
 =\frac{G(o\cdot h)}{(o\cdot n)(n\cdot h)} \tag{23}
+\end{align}
 $$
 带入(22)式中得：  
 $$
@@ -688,8 +710,10 @@ f_{ms}(\mu_o,\mu_i)=\frac{(1-E(\mu_o))(1-E(\mu_i))}{\pi(1-E_{avg})} \tag{27}
 $$
 其中`E_avg`是函数`E(μ)`在区间`[0,1]`的平均值：  
 $$
+\begin{align}
 E_{avg}=\frac{\int_{0}^{1}E(\mu)\mu d\mu}{\int_{0}^{1}\mu d\mu} \\
 =2\int_{0}^{1}E(\mu)\mu d\mu \tag{28}
+\end{align}
 $$
 其正确性参考课堂上给的过程： 
 ![14](./README_IMG/image-9.png)  
@@ -780,8 +804,10 @@ vec3 MultiScatterBRDF(float NdotL, float NdotV, vec3 F)
 ```
 目前来说，还只能补偿`albedo`为`1`情况下的能量。如果物体本身自带颜色，那还要考虑因为物体本身吸收能量而引起的能量损失。首先要定一个平均`Fresenl`项，来表示不同入射方向下打到微表面，平均被反射出去的能量占比多少。公式如下：  
 $$
+\begin{align}
 F_{avg}=\frac{\int_{0}^{1}F(\mu)\mu d\mu}{\int_{0}^{1}\mu d\mu} \\
 =2\int_{0}^{1}F(\mu)\mu d\mu \tag{29}
+\end{align}
 $$
 这篇[论文](https://blog.selfshadow.com/publications/s2017-shading-course/imageworks/s2017_pbs_imageworks_slides_v2.pdf)中，给出了该公式硬编码下的代码：  
 ![19](./README_IMG/image-14.png)   

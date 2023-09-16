@@ -207,13 +207,10 @@ class MeshRender {
 	draw(camera, fbo, updatedParamters) {
 		const gl = this.gl;
 
-		gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
 		gl.viewport(0.0, 0.0, window.screen.width, window.screen.height);
 		if (fbo != null) {
-			// Edit Start
-			// gl_draw_buffers.drawBuffersWEBGL(fbo.attachments);
+			//multiple render targets
 			gl.drawBuffers(fbo.attachments);
-			// Edit End
 		}
 		gl.useProgram(this.shader.program.glShaderProgram);
 
@@ -234,6 +231,5 @@ class MeshRender {
 			const offset = 0;
 			gl.drawElements(gl.TRIANGLES, vertexCount, type, offset);
 		}
-		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 	}
 }

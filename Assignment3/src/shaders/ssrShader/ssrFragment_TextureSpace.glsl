@@ -139,7 +139,7 @@ vec3 EvalDirectionalLight(vec2 uv) {
   vec3 Le = GetGBufferuShadow(uv) * uLightRadiance;
   return Le;
 }
-
+//ScreenSpace to ViewSpace
 float LinearizeDepth(float vDepth){
   float u_Near = uZBufferParams.x;
   float u_Far = uZBufferParams.y;
@@ -156,14 +156,12 @@ struct Ray
 struct Result
 {
   bool IsHit;
-
   vec2 UV;
   vec3 Position;
-
   int IterationCount;
 };
 
-vec4 projectToScreenSpace(vec3 point)
+vec4 projectToClipSpace(vec3 point)
 {
 	return uProjectionMatrix * vec4(point,1.0);
 }
@@ -189,37 +187,27 @@ Result RayMarching(Ray ray)
 {
 	Result result;
 
-  //endPos 不能超出近平面，否则反射出的颜色是错误的。超过的话，origin到近平面的最短距离 = origin沿dir到近平面的距离 * cosθ，cosθ = dir.z / 1.0;
   float rayLength = ((ray.Origin.z + ray.Direction.z * maxDistance) > -uZBufferParams.x) ?
   (-uZBufferParams.x - ray.Origin.z) / ray.Direction.z : maxDistance;
 
 	vec3 V0 = ray.Origin;
 	vec3 V1 = ray.Origin + ray.Direction * rayLength;
-  //将viewSpace下的origin和endPos转到screenSpace
-	vec4 H0 = projectToScreenSpace(V0);
-	vec4 H1 = projectToScreenSpace(V1);
+	vec4 H0 = projectToClipSpace(V0);
+	vec4 H1 = projectToClipSpace(V1);
 
 	float k0 = 1.0 / H0.w;
   float k1 = 1.0 / H1.w;
-  //Rasterizing a 3D line segment is very similar to rasterizing a 2D one. Rasterization can trivially interpolate any property linearly along the iteration direction
-  //. If the property is in homogeneous space, then the result will be linear interpolation of the corresponding value in 3D. Specifically, let point Q be a 3D point on the ray and H = M ·(Q,1)be its homogeneous perspective projection by matrix M. Properties k =1/(H ·(0,0,0,1))and Q·k interpolate linearly in 2D. So, treating the point and reciprocal of the homogeneous w as functions along the 2D line, ∂(Q·k) / ∂x , ∂k / ∂x , ∂(Q·k) / ∂y , and ∂k / ∂y are constant in screen space. 
 	vec3 Q0 = V0 * k0; 
   vec3 Q1 = V1 * k1;
 
-	// NDC-space
   vec2 P0 = H0.xy * k0;
   vec2 P1 = H1.xy * k1;
 	vec2 Size = vec2(windowWidth,windowHeight);
-	//Screen Space
 	P0 = (P0 + 1.0) / 2.0 * Size;
 	P1 = (P1 + 1.0) / 2.0 * Size;
 
-  //opt
-	// P1 += vec2((distanceSquared(P0, P1) < 0.0001) ? 0.01 : 0.0);
-
 	vec2 Delta = P1 - P0;
 
-  //是否重新排序，我们只处理Delta较大情况
 	bool Permute = false;
   if (abs(Delta.x) < abs(Delta.y)) { 
       Permute = true;
@@ -228,8 +216,6 @@ Result RayMarching(Ray ray)
 	float StepDir = sign(Delta.x);
   float Invdx = StepDir / Delta.x;
 	
-  
-  //偏导函数的数值表示法
   vec3  dQ = (Q1 - Q0) * Invdx;
   float dk = (k1 - k0) * Invdx;
   vec2  dP = vec2(StepDir, Delta.y * Invdx);
@@ -245,20 +231,17 @@ Result RayMarching(Ray ray)
 	float k = k0;
 	vec3 Q = Q0;
   vec2 P = P0;
-  //x + δx,y + δy,Q.z + δQ.z ...，δx = StepDir。
-  //δy = δx * Delta.y * Invdx，同理Q.z 和 k。
 	for(;((P.x * StepDir) <= EndX) && 
       Step < MaxStep;
       Step+=1.0,P += dP, Q.z += dQ.z, k += dk)
 	{
 		result.UV = Permute ? P.yx : P;
 		float depth;
-    //At any 2D point (x,y), the corresponding 3D point is Q0(x,y)=(Q·k)(x,y) / k(x,y)，Q0(z)=(Q·k)(z) / k(z)
 		depth = Q.z / k;
 		if(result.UV.x > windowWidth || result.UV.x < 0.0 || result.UV.y > windowHeight || result.UV.y < 0.0)
 			break;
 		result.IsHit = Query(depth, result.UV);
-		if (result.IsHit && Step > 1.0)
+    if (result.IsHit)
 			break;
 	}
 	return result;
@@ -304,7 +287,6 @@ void main() {
   // //test
   // L = EvalReflect(wo,screenUV);
 
-
   //直接光照
   //L = V * Le * brdf * cos / pdf,pdf==1.
   vec3 L_Normal = GetGBufferNormalWorld(screenUV);
@@ -344,6 +326,6 @@ void main() {
 
   L = L + L_ind;
 
-  vec3 color = pow(clamp(L, vec3(0.0), vec3(1.0)), vec3(1.0 / 2.2));
+  vec3 color = pow(L, vec3(1.0 / 2.2));
   FragColor = vec4(vec3(color.rgb), 1.0);
 }

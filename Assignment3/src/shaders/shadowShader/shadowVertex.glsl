@@ -1,9 +1,4 @@
 #version 300 es
-
-// attribute vec3 aVertexPosition;
-// attribute vec3 aNormalPosition;
-// attribute vec2 aTextureCoord;
-
 layout (location = 0) in vec3 aVertexPosition;
 layout (location = 1) in vec3 aNormalPosition;
 layout (location = 2) in vec2 aTextureCoord;

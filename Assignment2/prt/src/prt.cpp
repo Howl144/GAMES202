@@ -11,6 +11,7 @@
 #include <stb_image.h>
 #include <type_traits>
 #include <cassert>
+#include <omp.h>
 
 NORI_NAMESPACE_BEGIN
 
@@ -55,6 +56,7 @@ namespace ProjEnv
 
     float CalcPreArea(const float &x, const float &y)
     {
+        //atan2的优势是可以正确处理异常的情况
         return std::atan2(x * y, std::sqrt(x * x + y * y + 1.0));
     }
 
@@ -62,16 +64,14 @@ namespace ProjEnv
                    const int &height)
     {
         //https://www.rorydriscoll.com/2012/01/15/cubemap-texel-solid-angle/
-        // transform from [0..res - 1] to [- (1 - 1 / res) .. (1 - 1 / res)]
         // ( 0.5 is for texel center addressing)
         float u = (2.0 * (u_ + 0.5) / width) - 1.0;
         float v = (2.0 * (v_ + 0.5) / height) - 1.0;
 
-        // shift from a demi texel, mean 1.0 / size  with u and v in [-1..1]
         float invResolutionW = 1.0 / width;
         float invResolutionH = 1.0 / height;
 
-        // u and v are the -1..1 texture coordinate on the current face.
+        // u and v are the [-1,1] texture coordinate on the current face.
         // get projected area for this texel
         float x0 = u - invResolutionW;
         float y0 = v - invResolutionH;
@@ -111,6 +111,7 @@ namespace ProjEnv
             {
                 for (int x = 0; x < width; x++)
                 {
+                    //back to ndc
                     float u = 2 * ((x + 0.5) / width) - 1;
                     float v = 2 * ((y + 0.5) / height) - 1;
                     Eigen::Vector3f dir = (faceDirX * u + faceDirY * v + faceDirZ).normalized();
@@ -222,6 +223,7 @@ public:
 
                 Eigen::Array3d d = sh::ToVector(phi, theta);
                 const auto wi = Vector3f(d.x(), d.y(), d.z());
+                double pdf = 1.0 / (4 * M_PI);
                 double H = wi.normalized().dot(normal);
                 Intersection its;
                 if (H > 0.0 && scene->rayIntersect(Ray3f(pos, wi.normalized()), its))
@@ -247,6 +249,7 @@ public:
                     {
                         //采样到投影后的coeffes乘以cos做权重，这里不是蒙特卡洛积分。
                         (*coeffs)[i] +=  (*nextBouncesCoeffs)[i] * H / m_SampleCount;
+                        // (*coeffs)[i] += 1 / M_PI * (*nextBouncesCoeffs)[i] * H / pdf / m_SampleCount;//Incorrect method
                     }
                 }
             }
@@ -282,7 +285,7 @@ public:
             m_LightCoeffs.col(i) = (envCoeffs)[i];
         }
         std::cout << "Computed light sh coeffs from: " << cubePath.str() << " to: " << lightPath.str() << std::endl;
-        // Projection transport
+        // Projection transport , column-major
         m_TransportSHCoeffs.resize(SHCoeffLength, mesh->getVertexCount());
         fout << mesh->getVertexCount() << std::endl;
         for (int i = 0; i < mesh->getVertexCount(); i++)
@@ -323,7 +326,9 @@ public:
         if (m_Type == Type::Interreflection)
         {
             // TODO: leave for bonus
-
+            m_InterTransportSHCoeffs.resize(SHCoeffLength, mesh->getVertexCount());
+            
+            #pragma omp parallel for
             for (int i = 0; i < mesh->getVertexCount(); i++)
             {
                 const Point3f& v = mesh->getVertexPositions().col(i);
@@ -331,10 +336,11 @@ public:
                 auto indirectCoeffs = computeInterreflectionSH(&m_TransportSHCoeffs, v, n,m_TransportSHCoeffs.col(i), scene, 0);
                 for (int j = 0; j < SHCoeffLength; j++)
                 {
-                    m_TransportSHCoeffs.col(i).coeffRef(j) = (*indirectCoeffs)[j];
+                    m_InterTransportSHCoeffs.col(i).coeffRef(j) = (*indirectCoeffs)[j];
                 }
                 std::cout << "computing interreflection light sh coeffs, current vertex idx: " << i << " total vertex idx: " << mesh->getVertexCount() << std::endl;
             }
+            m_TransportSHCoeffs = m_InterTransportSHCoeffs;
         }
 
         // Save in face format
@@ -393,6 +399,7 @@ private:
     int m_SampleCount;
     std::string m_CubemapPath;
     Eigen::MatrixXf m_TransportSHCoeffs;
+    Eigen::MatrixXf m_InterTransportSHCoeffs;
     Eigen::MatrixXf m_LightCoeffs;
 };
 

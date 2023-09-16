@@ -1,10 +1,8 @@
 #version 300 es
-
 #ifdef GL_ES
-// #extension GL_EXT_draw_buffers: enable
 precision highp float;
 #endif
-
+//MRT
 layout(location = 0) out vec4 Frag0;
 
 uniform vec3 uCameraPos;

@@ -13,7 +13,7 @@ uniform sampler2D uGNormalWS;
 uniform sampler2D uGShadow;
 uniform vec3 uZBufferParams;
 
-uniform sampler2D uDepthTexture[12];
+uniform sampler2D uDepthTexture[10];
 
 in mat4 vWorldToScreen;
 in vec4 vPosWorld;
@@ -197,9 +197,6 @@ ivec2 getCellCount(int level){
   return textureSize(uDepthTexture[0], 0);
 }
 
-float DepthBack2Ndc(float screenSpaceDepth){
-  return screenSpaceDepth * 2.0 - 1.0;
-}
 
 float getMinimumDepthPlane(vec2 pos, int level){
   vec2 cellCount = vec2(getCellCount(level));
@@ -235,12 +232,6 @@ float getMinimumDepthPlane(vec2 pos, int level){
     else if(level == 9){
     return texelFetch(uDepthTexture[9], cell, 0).x;
   }
-    else if(level == 10){
-    return texelFetch(uDepthTexture[10], cell, 0).x;
-  }
-    else if(level == 11){
-    return texelFetch(uDepthTexture[11], cell, 0).x;
-  }
   return texelFetch(uDepthTexture[0], cell, 0).x;
 }
 
@@ -249,6 +240,9 @@ bool crossedCellBoundary(vec2 oldCellIdx,vec2 newCellIdx){
         || (floor(oldCellIdx.y) != floor(newCellIdx.y) );
 }
 
+float DepthBack2Ndc(float screenSpaceDepth){
+  return screenSpaceDepth * 2.0 - 1.0;
+}
 bool unpackVSInfo(
   in vec2 tid,
   out RayStartInfo rayStartInfo) {
@@ -288,12 +282,12 @@ SSRay PrepareSSRT(
   outMaxDistance = min(outMaxDistance, outReflDirInTS.y < 0.0 ? (-startInfo.samplePosInTS.y / outReflDirInTS.y) : ( (1.0-startInfo.samplePosInTS.y) / outReflDirInTS.y));
   outMaxDistance = min(outMaxDistance, outReflDirInTS.z < 0.0 ? (-startInfo.samplePosInTS.z / outReflDirInTS.z) : ((1.0-startInfo.samplePosInTS.z)/outReflDirInTS.z));
   SSRay ray;
-  ray.rayPosInVS =  startInfo.samplePosInVS.xyz;
-  ray.rayDirInVS = normalize(reflectionEndPosInVS.xyz - startInfo.samplePosInVS.xyz);
+  //ray.rayPosInVS =  startInfo.samplePosInVS.xyz;
+  //ray.rayDirInVS = normalize(reflectionEndPosInVS.xyz - startInfo.samplePosInVS.xyz);
   ray.rayPosInTS = startInfo.samplePosInTS;
   ray.rayDirInTS = outReflDirInTS;
   ray.maxDistance = outMaxDistance;
-  ray.minDistance = 0.0;
+  //ray.minDistance = 0.0;
   return ray;
 }
 
@@ -313,19 +307,12 @@ vec3 intersectCellBoundary(
   vec2 crossStep, 
   vec2 crossOffset
 ){
-  //光线所在单元格的下一个单元格
   vec2 index = rayCell + crossStep;
-  //下一个单元格的边界，根据当前level的单元格数量决定
   vec2 boundary = index / cell_count;
-  //边界偏移一点，防止步进时落在边界上。
   boundary += crossOffset;
-  //步进的距离
   vec2 delta = boundary - o.xy;
-  //标准化
   delta /= d.xy;
-  //选择最小被标准化后的步进值，代表朝着 离现在光线所在单元格最近的一个单元格 步进
   float t = min(delta.x, delta.y);
-  //步进后的点
   return intersectDepthPlane(o, d, t);
 }
 
@@ -335,14 +322,12 @@ bool FindIntersection_HiZ(
   in SSRay ss_ray,
   out vec3 intersection
 ) {
-   vec3 start = ss_ray.rayPosInTS;
-   vec3 rayDir = ss_ray.rayDirInTS;
-   float maxTraceDistance = ss_ray.maxDistance;
+  vec3 start = ss_ray.rayPosInTS;
+  vec3 rayDir = ss_ray.rayDirInTS;
+  float maxTraceDistance = ss_ray.maxDistance;
 
   vec2 crossStep = vec2(rayDir.x >= 0.0 ? 1.0 : -1.0, rayDir.y >= 0.0 ? 1.0 : -1.0);
   vec2 crossOffset = crossStep / vec2(windowWidth,windowHeight) / 128.;
-  //假设reflectDir不与屏幕的宽高平行,如果是向前步进一个单元格的距离，boundary = (rayCell + crossStep )/ cell_count + crossOffset,其中crossOffset > 0.
-  //如果是向后步进一个单元格的距离，boundary = (rayCell + vec(0,0) )/ cell_count + crossOffset,其中crossOffset < 0.
   crossStep = saturate(crossStep);
 
   vec3 ray = start;
@@ -353,39 +338,27 @@ bool FindIntersection_HiZ(
   vec3 o = ray;
   vec3 d = rayDir * maxTraceDistance;
 
-  int startLevel = 0;
+  int startLevel = 2;
   int stopLevel = 0;
-  vec2 startCellCount = vec2(getCellCount(startLevel));
 
-  //步进起点所在的单元格. 防止自相交。
+  vec2 startCellCount = vec2(getCellCount(startLevel));
   vec2 rayCell = getCell(ray.xy, startCellCount);
   ray = intersectCellBoundary(o, d, rayCell, startCellCount, crossStep, crossOffset * 128. * 2. );
 
   int level = startLevel;
   int iter = 0;
   bool isBackwardRay = rayDir.z < 0.;
-
   float Dir = isBackwardRay ? -1. : 1.;
-
   while( level >= stopLevel && ray.z * Dir <= maxZ * Dir && ++iter < 1000){
     vec2 cellCount = vec2(getCellCount(level));
-    //步进起点所在的单元格索引
     vec2 oldCellIdx = getCell(ray.xy, cellCount);
-    //步进起点所在单元格的GbufferDepth
     float cell_minZ = getMinimumDepthPlane((oldCellIdx + 0.5) / cellCount, level);
-    // if(cell_minZ == 1.0) return false;
-    //试探步：步进起点的深度小于GbufferDepth，则步进到ray.z >= gbufferDepth的地方
+    // if(cell_minZ == 1.0) return false;//解决SSR测试的问题
     vec3 tmpRay = ((cell_minZ > ray.z) && !isBackwardRay) ? intersectDepthPlane(o, d, (cell_minZ - minZ) / deltaZ) : ray;
-    //此次步进终点所在单元格的索引
     vec2 newCellIdx = getCell(tmpRay.xy, cellCount);
-
     float thickness = level == 0 ? (ray.z - cell_minZ) : 0.;
-    //步进起点和终点不在同一个单元格为true。
     bool crossed  = (isBackwardRay && (cell_minZ > ray.z))||(thickness > MAX_THICKNESS)|| crossedCellBoundary(oldCellIdx, newCellIdx);
-    //步进：不在同一个单元格 则寻找最近的一个单元格进行步进,在同一个单元格则步进到试探步的地方。
-    //前向追踪不适合用在后向追踪，如果是backwardRay，没有试探步。cell_minZ > ray.z为true则步进到下一个单元格level + 1，false则保留当前状态level - 1；
     ray = crossed ? intersectCellBoundary(o, d, oldCellIdx, cellCount, crossStep, crossOffset) : tmpRay;
-    //不在同一个单元格 则步进距离再次增大，在同一个单元格则距离减小。
     level = crossed ? min(MAX_MIPMAP_LEVEL, level + 1): level - 1;
   }
   bool intersected = (level < stopLevel);
@@ -393,26 +366,49 @@ bool FindIntersection_HiZ(
   return intersected;
 }
 
-vec3 VS2SS(vec3 posView) {
-  vec3 uvz = Project(uProjectionMatrix * vec4(posView, 1.0)).xyz * 0.5 + 0.5;
-  return uvz;
+vec3 projectToViewSpace(vec3 point)
+{
+	return vec3(uViewMatrix * vec4(point,1.0));
 }
 
+vec4 projectToClipSpace(vec3 point)
+{
+	return uProjectionMatrix * vec4(point,1.0);
+}
 // test Screen Space Ray Tracing 
-vec3 EvalReflect() {
-  vec2 tid = gl_FragCoord.xy;
+vec3 EvalReflect(vec3 wo,vec2 screenUV) {
+  // //从Gbufer中恢复TS中的原点和反射方向
+  // vec2 tid = gl_FragCoord.xy;
+  // RayStartInfo startInfo;
+  // bool hasIsect = unpackVSInfo(tid, startInfo);
+  // if(!hasIsect) {
+  //     return vec3(0.);
+  // }
+  // vec3 camToSampleInVS = normalize(startInfo.samplePosInVS.xyz);
+  // vec3 refDirInVS = normalize(reflect(camToSampleInVS, startInfo.sampleNormalInVS));
+  // SSRay ray = PrepareSSRT(startInfo, refDirInVS);
 
-  RayStartInfo startInfo;
-
-  bool hasIsect = unpackVSInfo(tid, startInfo);
-  if(!hasIsect) {
-      return vec3(0.);
-  }
-
-  vec3 camToSampleInVS = normalize(startInfo.samplePosInVS.xyz);
-  vec3 refDirInVS = normalize(reflect(camToSampleInVS, startInfo.sampleNormalInVS));
-
-  SSRay ray = PrepareSSRT(startInfo, refDirInVS);
+  //从世界坐标中恢复Ts中的原点和反射方向 速度稍微快点点
+  vec3 normalWS = GetGBufferNormalWorld(screenUV);
+  vec3 reflectDir = normalize(reflect(-wo,normalWS));
+  vec3 rayOriginWS = vPosWorld.xyz;
+  vec3 rayEndWS = rayOriginWS + reflectDir * 1.0;
+  vec3 rayOriginVS = projectToViewSpace(rayOriginWS);
+  vec3 rayEndVS    = projectToViewSpace(rayEndWS);
+  vec4 rayOriginCS = projectToClipSpace(rayOriginVS);
+  vec4 rayEndCS    = projectToClipSpace(rayEndVS);
+  rayOriginCS = rayOriginCS.xyzw / rayOriginCS.w;
+  rayEndCS    = rayEndCS.xyzw / rayEndCS.w;
+  vec3 rayOriginTS = (vec3(rayOriginCS) + 1.0) * 0.5;
+  vec3 rayEndTS = (vec3(rayEndCS) + 1.0) * 0.5;
+  vec3 reflectDirTS = normalize(rayEndTS - rayOriginTS);
+  float outMaxDistance = reflectDirTS.x >= 0.0 ? (1.0 - rayOriginTS.x) / reflectDirTS.x  : -rayOriginTS.x / reflectDirTS.x;
+  outMaxDistance = min(outMaxDistance, reflectDirTS.y < 0.0 ? (-rayOriginTS.y / reflectDirTS.y) : ( (1.0-rayOriginTS.y) / reflectDirTS.y));
+  outMaxDistance = min(outMaxDistance, reflectDirTS.z < 0.0 ? (-rayOriginTS.z / reflectDirTS.z) : ((1.0-rayOriginTS.z)/reflectDirTS.z));
+  SSRay ray;
+  ray.rayPosInTS = rayOriginTS;
+  ray.rayDirInTS = reflectDirTS;
+  ray.maxDistance = outMaxDistance;
 
   vec3 hitPos;
   vec3 reflectedColor = vec3(0.);
@@ -435,7 +431,7 @@ void main() {
   vec3 wo = normalize(uCameraPos - worldPos);
 
   // //test
-  // L = EvalReflect();
+  // L = EvalReflect(wo,screenUV);
 
   //直接光照
   //L = V * Le * brdf * cos / pdf,pdf==1.
@@ -473,6 +469,6 @@ void main() {
   L_ind /= float(SAMPLE_NUM);
   L = L + L_ind;
 
-  vec3 color = pow(clamp(L, vec3(0.0), vec3(1.0)), vec3(1.0 / 2.2));
+  vec3 color = pow(L, vec3(1.0 / 2.2));
   FragColor = vec4(vec3(color.rgb), 1.0);
 }

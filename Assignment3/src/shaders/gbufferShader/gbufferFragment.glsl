@@ -1,9 +1,8 @@
 #version 300 es
 #ifdef GL_ES
-// #extension GL_EXT_draw_buffers: enable
 precision highp float;
 #endif
-
+//MRT
 layout(location = 0) out vec4 Frag0;  
 layout(location = 1) out vec4 Frag1;  
 layout(location = 2) out vec4 Frag2;
@@ -64,13 +63,12 @@ float Linear01Depth( float z )
 
 void main(void) {
   vec3 kd = texture(uKd, vTextureCoord).rgb;
-  //albedo
+  //albedo 
   Frag0 = vec4(kd, 1.0);
-  //depth
+  //depth not linear
   Frag1 = vec4(vec3(gl_FragCoord.z), 1.0);
   //world space normal(uNt)
   Frag2 = vec4(ApplyTangentNormalMap(), 1.0);
   //shadow value 0 or 1
   Frag3 = vec4(vec3(SimpleShadowMap(vPosWorld.xyz, 1e-4)), 1.0);
-
 }

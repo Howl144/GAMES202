@@ -155,6 +155,8 @@ bool RayMarch(vec3 ori, vec3 dir, out vec3 hitPos) {
   {
     float curDepth = GetDepth(curPos);
     vec2 curScreenUV = GetScreenCoordinate(curPos);
+    if(curScreenUV.x < 0.0 || curScreenUV.x > 1.0 || curScreenUV.y < 0.0 || curScreenUV.y > 1.0)
+      break;
     float gBufferDepth = GetGBufferDepth(curScreenUV);
 
     if(curDepth - gBufferDepth > 0.0001){
@@ -194,40 +196,38 @@ void main() {
   vec3 wi = normalize(uLightDir);
   vec3 wo = normalize(uCameraPos - worldPos);
 
-  // //test
-  // L = EvalReflect(wi,wo,screenUV);
+  //test
+  L = EvalReflect(wi,wo,screenUV);
 
-  //直接光照
-  //L = V * Le * brdf * cos / pdf,pdf==1.
-  vec3 L_Normal = GetGBufferNormalWorld(screenUV);
-  L = EvalDiffuse(screenUV) * EvalDirectionalLight(screenUV) * max(0., dot(L_Normal, wi));
+  // //直接光照
+  // //L = V * Le * brdf * cos
+  // vec3 L_Normal = GetGBufferNormalWorld(screenUV);
+  // L = EvalDiffuse(screenUV) * EvalDirectionalLight(screenUV) * max(0., dot(L_Normal, wi));
 
-  //间接光
-  vec3 L_ind = vec3(0.0);
-  for(int i = 0; i < SAMPLE_NUM; i++){
-    float pdf;
-    vec3 localDir = SampleHemisphereCos(s, pdf);
-    vec3 L_ind_Normal = GetGBufferNormalWorld(screenUV);
-    vec3 b1, b2;
-    LocalBasis(L_ind_Normal, b1, b2);
-    vec3 dir = normalize(mat3(b1, b2, L_ind_Normal) * localDir);
+  // //间接光
+  // vec3 L_ind = vec3(0.0);
+  // for(int i = 0; i < SAMPLE_NUM; i++){
+  //   float pdf;
+  //   vec3 localDir = SampleHemisphereCos(s, pdf);
+  //   vec3 L_ind_Normal = GetGBufferNormalWorld(screenUV);
+  //   vec3 b1, b2;
+  //   LocalBasis(L_ind_Normal, b1, b2);
+  //   vec3 dir = normalize(mat3(b1, b2, L_ind_Normal) * localDir);
 
-    //world space pos
-    vec3 hitPos;
-    if(RayMarch(worldPos, dir, hitPos)){
-      vec2 hitScreenUV = GetScreenCoordinate(hitPos);
-      //castRay =  V * Le * brdf * cos / pdf,pdf == 1.
-      vec3 hitNormal = GetGBufferNormalWorld(hitScreenUV);
-      vec3 castRay = EvalDiffuse(hitScreenUV) * EvalDirectionalLight(hitScreenUV) * max(0., dot(hitNormal, wi));
-      //L_ind += castRay * brdf * cos / pdf
-      L_ind += castRay * EvalDiffuse(screenUV) * max(0., dot(L_ind_Normal, dir)) / pdf;
-    }
-  }
+  //   //world space pos
+  //   vec3 hitPos;
+  //   if(RayMarch(worldPos, dir, hitPos)){
+  //     vec2 hitScreenUV = GetScreenCoordinate(hitPos);
+  //     //castRay =  V * Le * brdf * cos.
+  //     vec3 hitNormal = GetGBufferNormalWorld(hitScreenUV);
+  //     vec3 castRay = EvalDiffuse(hitScreenUV) * EvalDirectionalLight(hitScreenUV) * max(0., dot(hitNormal, wi));
+  //     //L_ind += castRay * brdf * cos / pdf
+  //     L_ind += castRay * EvalDiffuse(screenUV) * max(0., dot(L_ind_Normal, dir)) / pdf;
+  //   }
+  // }
+  // L_ind /= float(SAMPLE_NUM);
+  // L = L + L_ind;
 
-  L_ind /= float(SAMPLE_NUM);
-
-  L = L + L_ind;
-
-  vec3 color = pow(clamp(L, vec3(0.0), vec3(1.0)), vec3(1.0 / 2.2));
+  vec3 color = pow(L, vec3(1.0 / 2.2));
   FragColor = vec4(vec3(color.rgb), 1.0);
 }

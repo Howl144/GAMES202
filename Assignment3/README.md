@@ -1,137 +1,156 @@
-![](https://github.com/DrFlower/GAMES_101_202_Homework/blob/main/Homework_202/Assignment3/README_IMG/games202-homework3_top.jpg)
+# 效果图  
 
-![](https://github.com/DrFlower/GAMES_101_202_Homework/blob/main/Homework_202/Assignment3/README_IMG/games202-homework3_final.png)
+由于测试时我电脑的GPU是办公本的核显（GPU AMD Radeon(TM) 530），帧率很低，我就在比较简单的环境（cube1）下比较它们的纯镜面反射差异。  
 
-## 作业总览
+World Space SSR  
+![1](./README_IMG/world-fps.png)  
+Efficient GPU SSR  
+![2](./README_IMG/texture-fps.png)  
+Hierarchical-Z SSR  
+![3](./README_IMG/hiz-fps.png)  
+可以看到`Hierarchical-Z SSR`的帧率最高，是`World Space SSR`帧率的4倍，其次是`Efficient GPU SSR`是`World Space SSR`帧率的2倍。  
 
-1. 实现对场景直接光照着色（考虑阴影）。
-2. 实现屏幕空间下光线的求交（SSR）。
-3. 实现对场景间接光照的着色。
-4. Bonus 1：实现Mipmap优化的 Screen Space Ray Tracing（Hiz优化）。
+# 作业总览  
 
-## 源码
+1. 实现直接光照。  
+2. 实现Screen Space Ray Tracing。  
+3. 实现间接光照。  
+4. Bonus 1：实现Mipmap优化的 Screen Space Ray Tracing。  
 
-[GAMES101&202 Homework](https://github.com/DrFlower/GAMES_101_202_Homework)
+个人扩展：`Efficient GPU Screen-Space Ray Tracing`   
 
-## 作业流程
+# 源码  
 
-只看基础部分的话，本次作业流程很简单，框架同样沿用作业1、作业2相同的框架，有了前面对这个框架熟悉的经验，我们直接看``WebGLRenderer.js``中的渲染流程后，就可以上手去完成这个作业了。渲染流程是这样的，第一个Shadow Pass先绘制场景的shadow map，第二个是GBuffer Pass，把shadow map，和模型的diffuse map、normal map传入shader，最后生成diffuse、depth、normal、shadow、worldPos五个GBuffer信息，最后到Camera Pass渲染最终显示内容，对应的fragment shader是``ssrFragment.glsl``，基础部分要实现的内容都在这个shader中实现。
+暂未公开。
 
-作业框架也提供了3个场景供以切换，验证不同阶段的效果，其中前两个都是Cube场景，第三个是Cave场景，Cube和Cave之前切换时，注意有灯光和摄像机两套参数需要切换，在``engine.js``修改即可。
+# 前言  
 
-至于提高部分，有点过于麻烦了，本文后面再具体说。
+本文重点放在算法本身，源码中相关地方注释很明确，对于框架的理解不再做过多解释。  
+本次SSR算法总共有三种，分别World Space Ray Marching SSR,[Efficient GPU SSR](https://jcgt.org/published/0003/04/04/paper.pdf)和[Hierarchical-Z SSR](https://sugulee.wordpress.com/2021/01/19/screen-space-reflections-implementation-and-optimization-part-2-hi-z-tracing-method/)。  
 
-## 实现
+# 实现  
 
-### 直接光照
+## World Space Ray Marching SSR  
 
-```c
-//ssrFragment.glsl
+本次作业的基础部分比较简单，算法本身并不复杂，所以这里就附带将`SSR Pass`的准备工作一并讲一下，这也为后面的算法做好准备。  
 
-/*
- * Evaluate diffuse bsdf value.
- *
- * wi, wo are all in world space.
- * uv is in screen space, [0, 1] x [0, 1].
- *
- */
-vec3 EvalDiffuse(vec3 wi, vec3 wo, vec2 uv) {
-  vec3 albedo  = GetGBufferDiffuse(uv);
-  vec3 normal = GetGBufferNormalWorld(uv);
-  float cos = max(0., dot(normal, wi));
-  return albedo * cos * INV_PI;
-}
+### 直接光照  
 
-/*
- * Evaluate directional light with shadow map
- * uv is in screen space, [0, 1] x [0, 1].
- *
- */
-vec3 EvalDirectionalLight(vec2 uv) {
-  vec3 Le = GetGBufferuShadow(uv) * uLightRadiance;
-  return Le;
-}
-
+我们先看下渲染方程，这里以`SSAO`为例讲解一下`Visibility`怎么处理：  
+![4](./README_IMG/image.png)  
+通过上图所说的`The RTR Approximation`，我们可以得到`Visibility`拆出后的方程：  
+$$
+\begin{align}
+& L_o(p,w_o)=\int_{\Omega+}L_i(p,w_i)f_r(p,w_i,w_o)V(p,w_i)\cos\theta_i dw_i \\
+& \approx \frac{\rho}{\pi}\cdot L_i(p)\cdot\pi\cdot\frac{\int_{\Omega+}V(p,w_i)\cos\theta_i dw_i}{\pi} \tag{1}
+\end{align}
+$$
+但`SSAO`考虑的是`diffuse`物体局部范围内不带颜色的全局光照，其积分域在各个方向上都可能有贡献，所以这里要算积分值。  
+而我们要实现的直接光照是来自平行光，平行光和点光源的一个重要特性：  
+光源的方向是确定的，也就是说平行光和点光源到着色点只会有一条光线有贡献，其他方向上的贡献为`0`。那我们也就不用积分了，上述渲染方程直接为：  
+$$
+\begin{align}
+L_o(p,w_o)=L_i(p,w_i)f_r(p,w_i,w_o)V(p,w_i)\cos\theta_i \tag{2}
+\end{align}
+$$
+所以代码实现就简单了，如下：  
+```cpp
+//直接光照
+//L = V * Le * brdf * cos
+vec3 L_Normal = GetGBufferNormalWorld(screenUV);
+L = EvalDiffuse(screenUV) * EvalDirectionalLight(screenUV) * max(0., dot(L_Normal, wi));
 ```
+`V`项包含在`EvalDirectionalLight`函数中。  
 
-EvalDiffuse和EvalDirectionalLight其实对应了渲染方程中的$f_{r}$和$L_{i}$。
+可以看到`Normal`等信息是从`Gbuffer`中获得的，`Gbuffer`纹理可以理解成是帧缓冲的`Color Attachment`，我们现在创建一个帧缓冲，并为它提供`4`个`Color Attachment`:  
+```js
+class FBO{
+    constructor(gl, GBufferNum, width, height){
+        ...
+        function CreateAndBindColorTargetTexture(fbo, attachment, width, height) {
+            //创建纹理对象并设置其尺寸和参数
+            var texture = gl.createTexture();
+            ...
+            gl.bindTexture(gl.TEXTURE_2D, texture);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, width, height, 0, gl.RGBA, gl.FLOAT, null);
+            ...
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, attachment, gl.TEXTURE_2D, texture, 0);
+            return texture;
+        };
+        ...
+        //创建帧缓冲区对象并绑定
+        var framebuffer = gl.createFramebuffer();
+        gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+        //在JavaScript中，对象是动态的，可以随时添加属性和方法
+	    framebuffer.attachments = [];
+	    framebuffer.textures = []
+        ...
+	    for (var i = 0; i < GBufferNum; i++) {
+            var attachment = gl.COLOR_ATTACHMENT0 + i;
+	    	// var texture = CreateAndBindColorTargetTexture(framebuffer, attachment);
+            var texture = CreateAndBindColorTargetTexture(framebuffer, attachment, width, height, 0);
+	    	framebuffer.attachments.push(attachment);
+	    	framebuffer.textures.push(texture);
 
-对于EvalDiffuse，需要注意的是这里使用的是Lambertian漫反射，需要除以π，另外Lambertian漫反射本身其实与wi和wo无关，但函数参数传入了wi和wo，而作业的间接光照部分给出的伪代码也没有cos项，所以这里实现直接把cos项放EvalDiffuse里了，这里感觉作业没有说得太清楚。
-
-EvalDirectionalLight则注意考虑上阴影的visibility项，否则没有阴影。
-
-```c
-//ssrFragment.glsl
-
-void main() {
-  float s = InitRand(gl_FragCoord.xy);
-
-  vec3 L = vec3(0.0);
-  // L = GetGBufferDiffuse(GetScreenCoordinate(vPosWorld.xyz));
-
-  vec3 worldPos = vPosWorld.xyz;
-  vec2 screenUV = GetScreenCoordinate(vPosWorld.xyz);
-  vec3 wi = normalize(uLightDir);
-  vec3 wo = normalize(uCameraPos - worldPos);
-
-  // 直接光照
-  L = EvalDiffuse(wi, wo, screenUV) * EvalDirectionalLight(screenUV);
-
-  vec3 color = pow(clamp(L, vec3(0.0), vec3(1.0)), vec3(1.0 / 2.2));
-  gl_FragColor = vec4(vec3(color.rgb), 1.0);
+            if(gl.checkFramebufferStatus(gl.FRAMEBUFFER) != gl.FRAMEBUFFER_COMPLETE)
+                console.log(gl.checkFramebufferStatus(gl.FRAMEBUFFER));
+	    }
+	    // * Tell the WEBGL_draw_buffers extension which FBO attachments are
+	    //   being used. (This extension allows for Multiple Render Targets.)
+        gl.drawBuffers(framebuffer.attachments);
+        ...
+        return framebuffer;
+    }
+}
+camera.fbo = new FBO(gl, 4);
+const directionLight = new DirectionalLight(lightRadiance, lightPos, lightDir, lightUp, renderer.gl);
+```
+其中`ShadowBuffer`在创建方向光对象时被创建，而`Gbuffer`附加在相机对象上，`Gbuffer`包含的`4`张纹理如下：  
+```js
+void main(void) {
+  vec3 kd = texture(uKd, vTextureCoord).rgb;
+  //albedo 
+  Frag0 = vec4(kd, 1.0);
+  //depth not linear
+  Frag1 = vec4(vec3(gl_FragCoord.z), 1.0);
+  //world space normal(uNt)
+  Frag2 = vec4(ApplyTangentNormalMap(), 1.0);
+  //shadow value 0 or 1
+  Frag3 = vec4(vec3(SimpleShadowMap(vPosWorld.xyz, 1e-4)), 1.0);
 }
 ```
-
-main函数中计算出EvalDiffuse和EvalDirectionalLight所需要的参数，并调用他们计算出最终的光照结果即可，由于我们需要从GBuffer中用屏幕坐标取值，用GetScreenCoordinate可以计算出世界坐标对应的屏幕坐标，而wi为入射光方向，wo为出射方向（光线从物体到摄像机的方向）。
-
-结果如下：
-
-![](https://github.com/DrFlower/GAMES_101_202_Homework/blob/main/Homework_202/Assignment3/README_IMG/games202-homework3_direct_light.png)
-
+`Gbuffer`准备好以后，我们就可以得到直接光的效果了：  
+![5](./README_IMG/image-1.png)  
 
 ### Screen Space Ray Tracing
 
-Screen Space Ray Tracing似乎是闫老师的个人喜好叫法，其实就是SSR，我们需要实现RayMarch然后用镜面反射来检查我们的步进方向对不对。
+`SSR`就是在屏幕空间上做实时全局光照的一种方法。也就是在屏幕空间做`Ray Tracing`，而且我们不需要知道三维物体的三角形以及加速结构等，只需要屏幕空间的信息即`Gbuffer`的内容就可以完成`Ray Tracing`，也就是得到场景最外的一层壳，然后和这层壳求交。碰到交点后，还要算交点对`ShadingPoint`的贡献。  
 
-![](https://github.com/DrFlower/GAMES_101_202_Homework/blob/main/Homework_202/Assignment3/README_IMG/games202-homework3_ppt_linear_raymarch.png)
-
-RayMarch目的是求光线与物体交点，原理就是模拟光线从给定一个起点沿着某个方向每次步进一定的距离，用步进后光线的深度对比光线所在的屏幕坐标的场景物体深度，若光线深度大于场景物体深度，则相交，实现如下：
-
-```c
-//ssrFragment.glsl
-
+具体实现步骤如下图所示：  
+![6](./README_IMG/image-2.png)  
+根据`BRDF`的`lobe`，生成一根或多根光线，我们假设这里是镜面反射，那就只需要考虑一根反射光线，然后以固定步长沿着反射光线进行步进，每次步进都需要检查步进后光线的深度和场景的深度，直到光线深度大于等于场景深度，就获取该交点处的`albedo`，然后根据渲染方程进行`Shading`：  
+```cpp
 bool RayMarch(vec3 ori, vec3 dir, out vec3 hitPos) {
-  float step = 0.05;
-  const int totalStepTimes = 150; 
+  float step = 0.02;
+  const int totalStepTimes = 1000; 
   int curStepTimes = 0;
-
   vec3 stepDir = normalize(dir) * step;
   vec3 curPos = ori;
   for(int curStepTimes = 0; curStepTimes < totalStepTimes; curStepTimes++)
   {
-    vec2 screenUV = GetScreenCoordinate(curPos);
-    float rayDepth = GetDepth(curPos);
-    float gBufferDepth = GetGBufferDepth(screenUV);
+    float curDepth = GetDepth(curPos);
+    vec2 curScreenUV = GetScreenCoordinate(curPos);
+    float gBufferDepth = GetGBufferDepth(curScreenUV);
 
-    if(rayDepth - gBufferDepth > 0.0001){
+    if(curDepth - gBufferDepth > 0.0001){
       hitPos = curPos;
       return true;
     }
-
+    //o + t * d
     curPos += stepDir;
   }
-
   return false;
 }
-```
-
-步长取多少需要根据场景实际情况来决定，步长取大了，效果会变差，因为求出来的交点会在物体后面，步长越大误差越大，反射出来的画面会有“断层”的瑕疵，而步长取短了会影响性能，这里步长我们固定取0.05，能得到比较好的效果。
-
-另外还需要设定最大步进次数，避免不相交时计算没有退出条件的问题，另一方面也可以把RayMarch的性能消耗在一定程度上做限制，步进太远还没有交点时，就认为没有交点。
-
-```c
-//ssrFragment.glsl
-
 // test Screen Space Ray Tracing 
 vec3 EvalReflect(vec3 wi, vec3 wo, vec2 uv) {
   vec3 worldNormal = GetGBufferNormalWorld(uv);
@@ -142,948 +161,538 @@ vec3 EvalReflect(vec3 wi, vec3 wo, vec2 uv) {
       return GetGBufferDiffuse(screenUV);
   }
   else{
-    return vec3(0.); 
+    return vec3(0.0);
   }
 }
+//test
+L = EvalReflect(wi,wo,screenUV);
 ```
+当然我们这里只是测试`SSR`是否能正常工作，没有考虑渲染方程，所以这里`EvalReflect`只是简单的返回交点处的`Albedo`。一切正常的话就会得到下面的图片：  
+![7](./README_IMG/world-space.png)  
 
-补充一个专门用来测试SSR的函数。
+### 间接光照  
 
-```c
-//ssrFragment.glsl
-
-void main() {
-  float s = InitRand(gl_FragCoord.xy);
-
-  vec3 L = vec3(0.0);
-  // L = GetGBufferDiffuse(GetScreenCoordinate(vPosWorld.xyz));
-
-  vec3 worldPos = vPosWorld.xyz;
-  vec2 screenUV = GetScreenCoordinate(vPosWorld.xyz);
-  vec3 wi = normalize(uLightDir);
-  vec3 wo = normalize(uCameraPos - worldPos);
-
-  // 直接光照
-  // L = EvalDiffuse(wi, wo, screenUV) * EvalDirectionalLight(screenUV);
-
-  // Screen Space Ray Tracing 的反射测试
-  L = (GetGBufferDiffuse(screenUV) + EvalReflect(wi, wo, screenUV))/2.;
-
-  vec3 color = pow(clamp(L, vec3(0.0), vec3(1.0)), vec3(1.0 / 2.2));
-  gl_FragColor = vec4(vec3(color.rgb), 1.0);
+有了上面的基础，间接光照就是直接算渲染方程的积分值。  
+在算积分之前，我们需要知道采样方向以及它的`Pdf`，然后用蒙特卡洛积分来计算。这里对于兰伯特材质直接使用`Cos-weighted`采样。其过程如下：  
+使用`Cos-weighted`采样，意味着`Pdf`和`Cos`项成正比，即`pdf(w)=c*cosθ`，则：  
+$$
+\begin{align}
+& \int_{\Omega^+}pdf(w)dw=1 \\
+& \int_{\Omega^+}c\cdot\cos\theta dw=1 \\
+& \int_{0}^{2\pi}\int_{0}^{\pi/2}c\cdot\cos\theta\sin\theta d\theta d\phi \\
+& =\int_{0}^{2\pi}\int_{0}^{\pi/2}c\cdot\sin\theta d\sin\theta d\phi \\
+& =\int_{0}^{2\pi}c\cdot \frac{\sin^2\theta}{2}\vert_{0}^{\pi/2} d\phi \\
+& =c\cdot\pi \tag{3}
+\end{align}
+$$
+则c=1/π，pdf=cosθ/π。采样方向还是用逆变换采样的方式来获取：  
+分别求其边缘概率密度函数：  
+$$
+\begin{align}
+& p(\theta)=\int_{0}^{2\pi}\frac{\cos\theta\sin\theta}{\pi}d\phi \\
+& =2\cos\theta\sin\theta \\
+& p(\phi)=\int_{0}^{\pi/2}\frac{\cos\theta\sin\theta}{\pi}d\theta \\
+& =\frac{\sin^2\theta}{2\pi}\vert_{0}^{\pi/2} \\
+& =\frac{1}{2\pi} \tag{4}
+\end{align}
+$$
+分别求其累积分布函数：  
+$$
+\begin{align}
+& P(\theta)=\int_{0}^{\theta}2\cos\theta\sin\theta d\theta \\
+& =\sin^2\theta \\
+& =1-\cos^2\theta \\
+& P(\phi)=\int_{0}^{\phi}\frac{1}{2\pi}d\phi \\
+& =\frac{\phi}{2\pi} \tag{5}
+\end{align}
+$$
+均匀的从`U[0,1]`中取出两个随机数$X_{1}$和$X_{2}$,则我们要的采样`θ`和`φ`为：  
+$$
+\begin{align}
+& \theta=\arccos(\sqrt{1-X_1}) \\
+& \phi=2\pi X_2 \tag{6}
+\end{align}
+$$
+则采样方向vec(x,y,z)为：  
+$$
+\begin{align}
+& x=\sin\theta\cos\phi=\sqrt{X_1}\cos(2\pi X_2) \\
+& y=\sin\theta\sin\phi=\sqrt{X_1}\sin(2\pi X_2) \\
+& z=\cos\theta=\sqrt{1-X_1} \tag{7}
+\end{align}
+$$
+对应代码如下：  
+```cpp
+vec3 SampleHemisphereCos(inout float s, out float pdf) {
+  vec2 uv = Rand2(s);
+  float z = sqrt(1.0 - uv.x);
+  float phi = uv.y * TWO_PI;
+  float sinTheta = sqrt(uv.x);
+  vec3 dir = vec3(sinTheta * cos(phi), sinTheta * sin(phi), z);
+  pdf = z * INV_PI;
+  return dir;
 }
 ```
-
-最后在main函数中把之前实现的直接光照换成要测SSR的函数，最后反射效果如下图，RayMarch实现正确。
-
-![](https://github.com/DrFlower/GAMES_101_202_Homework/blob/main/Homework_202/Assignment3/README_IMG/games202-homework3_ssr.png)
-
-
-### 间接光照
-
-![](https://github.com/DrFlower/GAMES_101_202_Homework/blob/main/Homework_202/Assignment3/README_IMG/games202-homework3_indirect_light.png)
-
-参考作业给出的伪代码实现间接光计算。
-
-```c
-//ssrFragment.glsl
-
-void main() {
-  float s = InitRand(gl_FragCoord.xy);
-
-  vec3 L = vec3(0.0);
-  // L = GetGBufferDiffuse(GetScreenCoordinate(vPosWorld.xyz));
-
-  vec3 worldPos = vPosWorld.xyz;
-  vec2 screenUV = GetScreenCoordinate(vPosWorld.xyz);
-  vec3 wi = normalize(uLightDir);
-  vec3 wo = normalize(uCameraPos - worldPos);
-
-  // 直接光照
-  L = EvalDiffuse(wi, wo, screenUV) * EvalDirectionalLight(screenUV);
-
-  // Screen Space Ray Tracing 的反射测试
-  // L = (GetGBufferDiffuse(screenUV) + EvalReflect(wi, wo, screenUV))/2.;
-
-  vec3 L_ind = vec3(0.0);
-  for(int i = 0; i < SAMPLE_NUM; i++){
-    float pdf;
-    vec3 localDir = SampleHemisphereCos(s, pdf);
-    vec3 normal = GetGBufferNormalWorld(screenUV);
-    vec3 b1, b2;
-    LocalBasis(normal, b1, b2);
-    vec3 dir = normalize(mat3(b1, b2, normal) * localDir);
-
-    vec3 position_1;
-    if(RayMarch(worldPos, dir, position_1)){
-      vec2 hitScreenUV = GetScreenCoordinate(position_1);
-      L_ind += EvalDiffuse(dir, wo, screenUV) / pdf * EvalDiffuse(wi, dir, hitScreenUV) * EvalDirectionalLight(hitScreenUV);
-    }
+获得的采样方向还需要通过TBN矩阵将其从切线空间转换到世界空间，有了采样方向和`Pdf`，用蒙特卡洛公式计算积分值：  
+$$
+\begin{align}
+L_o(p,w_o)\approx\frac{1}{N}\sum_{k=1}^{N}\frac{L_{i}(p,w_{i})f_{r}(p,w_{i},w_{o})\cos(\theta_{i})}{p(w_{i},w_{o})} \tag{8}
+\end{align}
+$$
+代码实现如下：  
+```cpp
+//直接光照
+//L = V * Le * brdf * cos
+vec3 L_Normal = GetGBufferNormalWorld(screenUV);
+L = EvalDiffuse(screenUV) * EvalDirectionalLight(screenUV) * max(0., dot(L_Normal, wi));
+//间接光
+vec3 L_ind = vec3(0.0);
+for(int i = 0; i < SAMPLE_NUM; i++){
+  float pdf;
+  vec3 localDir = SampleHemisphereCos(s, pdf);
+  vec3 L_ind_Normal = GetGBufferNormalWorld(screenUV);
+  vec3 b1, b2;
+  LocalBasis(L_ind_Normal, b1, b2);
+  vec3 dir = normalize(mat3(b1, b2, L_ind_Normal) * localDir);
+  //world space pos
+  vec3 hitPos;
+  if(RayMarch(worldPos, dir, hitPos)){
+    vec2 hitScreenUV = GetScreenCoordinate(hitPos);
+    //castRay =  V * Le * brdf * cos.
+    vec3 hitNormal = GetGBufferNormalWorld(hitScreenUV);
+    vec3 castRay = EvalDiffuse(hitScreenUV) * EvalDirectionalLight(hitScreenUV) * max(0., dot(hitNormal, wi));
+    //L_ind += castRay * brdf * cos / pdf
+    L_ind += castRay * EvalDiffuse(screenUV) * max(0., dot(L_ind_Normal, dir)) / pdf;
   }
-
-  L_ind /= float(SAMPLE_NUM);
-
-  L = L + L_ind;
-
-  vec3 color = pow(clamp(L, vec3(0.0), vec3(1.0)), vec3(1.0 / 2.2));
-  gl_FragColor = vec4(vec3(color.rgb), 1.0);
 }
+L_ind /= float(SAMPLE_NUM);
+L = L + L_ind;
 ```
+如果一切顺利，`World Space Ray Marching SSR`的效果如下：  
+![8](./README_IMG/image-3.png)  
+要想得到不错的效果需要用实时光追降噪或者提高采样数量，读者可以自己学完实时光追降噪后应用于此，我电脑不行就不折腾了。下面是洞穴的效果：  
+![9](./README_IMG/image-4.png)  
 
-间接光涉及到上半球采样方向和对应pdf的计算，这里作业提供了几个现成的函数来完成这部分计算，其中``InitRand(vec2 uv)``可以理解为取得一个随机种子，用gl_FragCoord.xy可以确保每个fragment都取得不同的随机种子。作业中提到的``Rand1(inout float p)``和``Rand2(inout float p)``其实可以不用关注，我们直接调用``SampleHemisphereUniform(inout float s, out float pdf)``或``SampleHemisphereCos(inout float s, out float pdf)``取得采样方向和对应pdf即可，其中前者为均匀采样，后者为按cos加权采样，这里使用SampleHemisphereCos。
+## Efficient GPU SSR  
 
-上面取得的方向，其实是单位上半球局部坐标系中的向量（位置），我们需要使用作业框架提供的函数``LocalBasis(vec3 n, out vec3 b1, out vec3 b2)``，取得两个切线向量，然后组成TBN矩阵把这个局部向量转换成世界坐标下的方向向量，也就是我们世界空间下的步进方向。
+### Digital Differential Analyzer  
 
-```c
-void LocalBasis(vec3 n, out vec3 b1, out vec3 b2) {
-  float sign_ = sign(n.z);
-  if (n.z == 0.0) {
-    sign_ = 1.0;
-  }
-  float a = -1.0 / (sign_ + n.z);
-  float b = n.x * n.y * a;
-  b1 = vec3(1.0 + sign_ * n.x * n.x * a, sign_ * b, -sign_ * n.x);
-  b2 = vec3(b, sign_ + n.y * n.y * a, -n.y);
-}
-```
+`Efficient GPU SSR`的核心思想是`DDA`(Digital Differential Analyzer)，该算法是用数值方法求解微分方程。  
+我们简单回顾一下`DDA`思想：  
+给定理想直线的起点坐标为$P_0(x_0,y_0)$终点坐标为$P_1(x_1,y_1)$，用斜截式表示的直线方程为：  
+$$
+\begin{align}
+y=kx+b \tag{9}
+\end{align}
+$$
+其中直线的斜率为$k=\frac{\Delta y}{\Delta x}$，$\Delta x=x_1-x_0$为水平方向位移，$\Delta y=y_1-y_0$为垂直方向位移，b为y轴上的截距。  
+在DDA算法中，常根据$\Delta x$和$\Delta y$的大小来确定绘图的主位移方向，在主位移方向上执行的是$\pm 1$，选定$\Delta$较大方向为主方向使得斜率k满足$0\leq k\leq1$（若δy大于δx则交换它们的值）：  
+![10](./README_IMG/image-5.png)  
+确定主方向后，上面9式的微分表示为： 
+$$
+\begin{align}
+\frac{\text{d}y}{\text{d}x}=\frac{\Delta y}{\Delta x}=\frac{\delta y}{\delta x}=k \tag{10}
+\end{align}
+$$
+其有限差分近似解为：  
+$$
+\begin{equation}
+\left\lbrace
+\begin{align}
+& x_{i+1}=x_i+\delta x=x_i+1 \\
+& y_{i+1}=y_i+\delta y=y_i+k\delta x=y_i+k
+\end{align}
+\right.
+\end{equation}
+$$
+$\Delta x$每次步进一个像素，根据上一次的点位$(x_i，y_i)$就可以确定当前的点$(x_{i+1},y_{i+1})$。最后将求得的点位进行$\text{int}(y_{i+1}+0.5)$取整即可得到对应的像素。
+最后得到的效果如图：  
+![11](./README_IMG/image-6.png)  
 
-作业提供的LocalBasis实现是这样的，说实话，我没太看懂，whatever，先不管。
+### An Efficient GPU DDA Solution
 
-然后我们就可以直接把作业中的伪代码代入到我们实现中了，调用写好的RayMarch，若与物体有交点，则计算其间接光照，这里传入的参数需要注意一下，虽说是模拟光线步进，但这里并不是真正的从光源出发的步进，而是反过来从某个着色点出发寻找有没有光源（这个光源是指提供了间接光照的着色点），所以position0的EvalDiffuse的光线入射方向是间接光源到该着色点的方向（也就是我们的步进方向），而出射方向则仍然是position0到摄像机的方向，而后面的EvalDiffuse和EvalDirectionalLight则是计算提供间接光照的着色点（position1）在position0位置观察的直接光照结果（有一丶绕），所以这里的入射方向是真正光源方向，出射方向是步进方向。最后需要把累加的间接光除以采样数取得平均值。
+对于`3D`空间中大多数反射光线，`3D`线性采样并不等同于`2D`线性采样，如下图所示。因此，即使步长已经取的很小，一次步进可能也会跳过屏幕上的多个像素点（这里是误差的主要来源），而且会出现多次步进都是对同一个像素点采样的情况（低效的主要原因）。  
+![12](./README_IMG/image-8.png)  
+右边的效果是我们这一节的主要内容。
 
-以上步骤是计算间接光的步骤，而最终光照结果是由直接光照+间接光照得出的，别忘了加上原本的直接光照的计算结果。
+重点是`RayMarching`函数，该函数的输入是`ViewSpace`下的反射方向以及它的起点，为了方便这里还是以纯镜面反射为例，全局光照参考`World Space Ray Marching SSR`可以实现。获取这两个参数的代码如下：  
+```cpp
+vec3 EvalReflect(vec3 wo,vec2 screenUV) {
+  vec3 normalWS = GetGBufferNormalWorld(screenUV);
+  vec3 reflectDir = normalize(reflect(-wo,normalWS));
+  vec3 rayOriginWS = vPosWorld.xyz;
+  vec3 rayEndWS = rayOriginWS + reflectDir * 1.0;
+  vec3 rayOriginVS = projectToViewSpace(rayOriginWS);
+  vec3 rayEndVS    = projectToViewSpace(rayEndWS);
+  vec3 reflectDirVS = normalize(rayEndVS - rayOriginVS);
+  Ray ray;
+  ray.Origin = rayOriginVS;
+  ray.Direction = reflectDirVS;
 
-最后我们可以切换一下场景2和场景3观察实现效果。
-
-```js
-//engine.js
-
-// Add shapes
-// loadGLTF(renderer, 'assets/cube/', 'cube1', 'SSRMaterial');// 场景1
-// loadGLTF(renderer, 'assets/cube/', 'cube2', 'SSRMaterial');// 场景2
-loadGLTF(renderer, 'assets/cave/', 'cave', 'SSRMaterial');// 场景3
-```
-
-另外注意如果是在cube和cave之间进行切换，还有两套摄像机和光源参数需要切换，都在``engine.js``这个脚本中，这里不罗列了。
-
-SAMPLE_NUM为1时，场景2和场景3的间接光效果如下，可以看到噪点很多，可以自行调整SAMPLE_NUM，减少噪点。
-
-
-![](https://github.com/DrFlower/GAMES_101_202_Homework/blob/main/Homework_202/Assignment3/README_IMG/games202-homework3_ssgi_cube.png)
-
-![](https://github.com/DrFlower/GAMES_101_202_Homework/blob/main/Homework_202/Assignment3/README_IMG/games202-homework3_ssgi_cave.png)
-
-
-### Bonus 1：实现Mipmap优化的 Screen Space Ray Tracing（Hiz优化）
-
-基础部分实现的固定距离步进的Raymarch，在遇到很长距离都没有交点的情况下，仍然会做很多次步进和深度比较，那么有没有办法动态调整步进距离，使得这种情况下可以减少步进次数呢？
-
-![](https://github.com/DrFlower/GAMES_101_202_Homework/blob/main/Homework_202/Assignment3/README_IMG/games202-homework3_ppt_generate_depth_mipmap.png)
-
-一个简单的优化思路是，我们使用深度图Mipmap，与常见Mipmap不同，这里使用的Mipmap不是记录更大一层的Mipmap对应的四个像素的平均值，而是记录四个像素的最小值。
-
-![](https://github.com/DrFlower/GAMES_101_202_Homework/blob/main/Homework_202/Assignment3/README_IMG/games202-homework3_ppt_why_depth_mipmap.png)
-
-有了最小深度的Mipmap后，我们相当于有了一个场景深度的加速结构，处于上层的Mipmap中的一个像素对应的深度反映了下层的Mipmap的一片区域的最小深度，如果当前光线与较上层的Mipmap无相交，则与下层的Mipmap也无相交。
-
-![](https://github.com/DrFlower/GAMES_101_202_Homework/blob/main/Homework_202/Assignment3/README_IMG/games202-homework3_ppt_hierachical_tracing.png)
-
-有了这个结构后，我们就可以动态调整步进距离了，我们可以尝试先步进一个小的距离，若与场景物体无相交，则可以逐步提高当前采样的Mipmap等级，因为高层Mipmap的一个像素对应了低层Mipmap的一个区域，提高了Mipmap等级也意味着步进距离也可以跟着增大了，若在高层Mipmap判断与场景物体有相交，意味着光线在这片区域内存在与场景物体的交点，则需要降低Mipmap等级直到找到具体的相交位置点。
-
-**题外话，只看基础部分，作业3大概是GAMES202全系列作业中最简单的一次作业，无论是理论本身和实现，相比其他作业都比较简单，也没有复杂的数学推导。虽说提高部分的理论也很简单精妙，但是要在给定的作业框架中去实现，直接把这个作业的麻烦程度提高到202全部作业中未曾有的高度（对于没太多WebGL经验的人来说）。**
-
-实现可以分为两个部分，一个是最小深度Mipmap的构建，另外就是基于Mipmap加速的Raymarch实现。
-
-#### 深度图的Mipmap生成
-
-首先我们这里用的“Mipmap”与常规的Mipmap不同，是取最小值，而硬件并没有提供这种操作，所以这个Mipmap的生成还是靠我们自己写的，我的尝试顺序是这样的：先尝试直接生成Mipmap然后修改Mipmap中的值为最小深度值，但是在WebGL1中并不能设置Mipmap等级为非0值，会直接报错；然后为了能设置这个Mipmap等级，我把整个框架升级到了WebGL2，包括一系列的图形API用法和shader的语法都要改一遍，但是我仍然没成功修改Mipmap的值；最后我干脆放弃了自带的Mipmap功能，直接生成不同分辨率的framebuffer写入我们需要的值，来作为我们的深度图Mipmap，不过即使不是用硬件提供的Mipmap，用这种自己创建不同分辨率framebuffer的方式，我也没能在WebGL1上尝试成功，会报错`` GL_INVALID_FRAMEBUFFER_OPERATION: Framebuffer is incomplete: Attachments are not all the same size.``这个问题，同样的实现方式在WebGL2上没问题。所以下面我提供的实现仍然需要升级到WebGL2。
-
-下面具体说一下作为WebGL小白摸索出来的实现方式。
-
-```js
-//engine.js
-
-var windowWidth;
-var windowHeight;
-var mipMapLevel;
-var depthMeshRender;
-```
-
-先在``engine.js``上加几个全局变量，后面会用到。
-
-```js
-//engine.js
-
-// Init gl
-// gl = canvas.getContext('webgl');
-// if (!gl) {
-// 	alert('Unable to initialize WebGL. Your browser or machine may not support it.');
-// 	return;
-// }
-// gl.getExtension('OES_texture_float');
-// gl_draw_buffers = gl.getExtension('WEBGL_draw_buffers');
-// var maxdb = gl.getParameter(gl_draw_buffers.MAX_DRAW_BUFFERS_WEBGL);
-// console.log('MAX_DRAW_BUFFERS_WEBGL: ' + maxdb);
-
-// Edit Start
-windowWidth = window.screen.width;
-windowHeight = window.screen.height;
-
-gl = canvas.getContext('webgl2');
-if (!gl) {
-	alert('Unable to initialize WebGL. Your browser or machine may not support it.');
-	return;
-}
-
-let ext = gl.getExtension('EXT_color_buffer_float')
-if (!ext) {
-	alert("Need EXT_color_buffer_float");
-	return;
-}
-// Edit End
-```
-
-还是``engine.js``，我们把原本的gl的初始化注释掉，改为webgl2的环境，然后开启``EXT_color_buffer_float``扩展，这个应该是直接对应上面的``OES_texture_float``扩展，不开的话，framebuffer里的颜色附件不能用float精度的，会直接报错，被坑了好久。
-
-然后对全局变量``windowWidth``和``windowHeight``进行了赋值，主要是方便后续访问，不用传参了。
-
-```js
-//FBO.js
-
-class FBO{
-    // Edit Start
-    constructor(gl, GBufferNum, width, height){
-    // Edit End
-        //定义错误函数
-        function error() {
-            if(framebuffer) gl.deleteFramebuffer(framebuffer);
-            if(texture) gl.deleteFramebuffer(texture);
-            if(depthBuffer) gl.deleteFramebuffer(depthBuffer);
-            return null;
-        }
-
-        function CreateAndBindColorTargetTexture(fbo, attachment, width, height) {
-            //创建纹理对象并设置其尺寸和参数
-            var texture = gl.createTexture();
-            if(!texture){
-                console.log("无法创建纹理对象");
-                return error();
-            }
-            gl.bindTexture(gl.TEXTURE_2D, texture);
-            // Edit Start
-            // gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, window.screen.width, window.screen.height, 0, gl.RGBA, gl.FLOAT, null);
-            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, width, height, 0, gl.RGBA, gl.FLOAT, null);
-            // Edit End
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-
-            // Edit Start
-            gl.framebufferTexture2D(gl.FRAMEBUFFER, attachment, gl.TEXTURE_2D, texture, 0);
-            // Edit End
-
-            return texture;
-        };
-
-        //创建帧缓冲区对象
-        var framebuffer = gl.createFramebuffer();
-        if(!framebuffer){
-            console.log("无法创建帧缓冲区对象");
-            return error();
-        }
-        gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-        
-        // Edit Start
-        // var GBufferNum = 5;
-        // Edit End
-        
-	    framebuffer.attachments = [];
-	    framebuffer.textures = []
-
-        // Edit Start
-        if(width == null){
-            width = windowWidth;
-        }
-        if(height == null){
-            height = windowHeight;
-        }
-
-        framebuffer.width = width;
-        framebuffer.height = height;
-        // Edit End
-
-	    for (var i = 0; i < GBufferNum; i++) {
-            // Edit Start
-	    	// var attachment = gl_draw_buffers['COLOR_ATTACHMENT' + i + '_WEBGL'];
-            var attachment = gl.COLOR_ATTACHMENT0 + i;
-	    	// var texture = CreateAndBindColorTargetTexture(framebuffer, attachment);
-            var texture = CreateAndBindColorTargetTexture(framebuffer, attachment, width, height, 0);
-	    	framebuffer.attachments.push(attachment);
-	    	framebuffer.textures.push(texture);
-
-            if(gl.checkFramebufferStatus(gl.FRAMEBUFFER) != gl.FRAMEBUFFER_COMPLETE)
-                console.log(gl.checkFramebufferStatus(gl.FRAMEBUFFER));
-            // Edit End
-	    }
-	    // * Tell the WEBGL_draw_buffers extension which FBO attachments are
-	    //   being used. (This extension allows for multiple render targets.)
-        // Edit Start
-	    // gl_draw_buffers.drawBuffersWEBGL(framebuffer.attachments);
-        gl.drawBuffers(framebuffer.attachments);
-        // Edit End
-
-        // Create depth buffer
-        var depthBuffer = gl.createRenderbuffer(); // Create a renderbuffer object
-        gl.bindRenderbuffer(gl.RENDERBUFFER, depthBuffer); // Bind the object to target
-        // Edit Start
-        // gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, window.screen.width, window.screen.height);
-        gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, width, height);
-        // Edit End
-        gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depthBuffer);
-
-        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-        gl.bindTexture(gl.TEXTURE_2D, null);
-        gl.bindRenderbuffer(gl.RENDERBUFFER, null);
-
-        return framebuffer;
-    }
-}
-```
-
-然后我们对FBO类进行改造，修改部分都标记了Edit了，主要是以下几点：
-1. 构造函数增加了参数GBufferNum、width、height，GBufferNum主要是控制创建的FrameBuffer里面添加多少个color attachment，默认是都添加5个，用在GBuffer上没问题，但是作业框架里ShadowMap的FBO也会使用5个color attachment，一是占用资源，二是也给截帧Debug时增加了无效信息，干脆一并改了。
-2. 由于我们通过创建多个不同分辨率的FrameBuffer来构造深度图的Mipmap，所以这里分辨率从使用窗口分辨率改成使用传入的参数，主要涉及color attachments和render buffer的分辨率。
-3. 创建color attachment时，texImage2D函数的第三个、第七个、第八个参数分别为internalformat、format、type，当升级为WebGL2后，internalformat需要改成``gl.RGBA32F``，但format和type不能改，且format和type是有固定搭配的，不是随便使用两个枚举都能使用，需要查官方给的表格，被坑了很久x2。
-4. 升级为WebGL2后，color attachment的访问方式由``gl_draw_buffers['COLOR_ATTACHMENT' + i + '_WEBGL']``变成``gl.COLOR_ATTACHMENT0 + i``。
-5. 升级为WebGL2后，``gl_draw_buffers.drawBuffersWEBGL``需要改成``gl.drawBuffers``。
-
-```js
-//MeshRender.js
-
-draw(camera, fbo, updatedParamters) {
-	// ...
-	if (fbo != null) {
-		// Edit Start
-		// gl_draw_buffers.drawBuffersWEBGL(fbo.attachments);
-		gl.drawBuffers(fbo.attachments);
-		// Edit End
+  Result result = RayMarching(ray);
+  if(result.IsHit){
+    return GetGBufferDiffuse(result.UV / vec2(windowWidth,windowHeight)).xyz;
 	}
-	// ...
+  else{
+    return vec3(0.0);
+  }
 }
 ```
+`3D`线段光栅化与`2D`线段光栅化非常相似。光栅化可以很容易地沿迭代方向对任何属性进行线性插值。如果属性处于齐次空间，则结果将线性插值`3D`空间中对应的属性值。具体来说，设点`Q`为射线上的一个`3D`点，`H = M·(Q,1)`为其左乘透视投影矩阵`M`的齐次透视投影。属性`k = 1/(H·(0,0,0,1))`和`Q·k`可以在`2D`中线性插值。因此，如果把该点和齐次`w`的倒数看作是沿`2D`线的函数，那么`∂(Q·k) / ∂x`，`∂k / ∂x`，`∂(Q·k) / ∂y`，和`∂k / ∂y`在屏幕空间中都是常数。  
 
-在``MeshRender.js``中同样有个地方需要把``gl_draw_buffers.drawBuffersWEBGL``改成``gl.drawBuffers``。
+其中`∂(Q·k) / ∂x`，`∂k / ∂x`，`∂(Q·k) / ∂y`，和`∂k / ∂y`是函数`Q·k`的偏微分表示。  
+`∂(Q·k) / ∂x`表示函数 Q·k 对 x 的偏微分，即改变 x 时 Q·k 的变化情况。  
+`∂k / ∂x`表示函数 k 对 x 的偏微分，即改变 x 时 k 的变化情况。  
+`∂(Q·k) / ∂y`表示函数 Q·k 对 y 的偏微分，即改变 y 时 Q·k 的变化情况。  
+`∂k / ∂y`表示函数 k 对 y 的偏微分，即改变 y 时 k 的变化情况。  
 
-```js
-//DirectionalLight.js
+在任意`2D`线段上的点$Q(x，y)$，其对应的三维点为$Q'$:  
+$$
+\begin{align}
+& Q'(x,y)=\frac{(Q·k)(x,y)}{k(x,y)} \\
+& Q'(z)=\frac{(Q·k)(z)}{k(z)} \tag{11}
+\end{align}
+$$
+有了3D深度信息后，我们就可以和Gbuffer中的深度信息进行比对了。在此之前我们需要知道`∂(Q·k) / ∂x`，`∂k / ∂x`偏微分的数值表示，而Gbuffer中的深度信息读取需要另一个偏微分`∂y / ∂x`。  
 
-class DirectionalLight {
-    constructor(lightRadiance, lightPos, lightDir, lightUp, gl) {
-        // ...
-        // Edit Start
-        this.fbo = new FBO(gl, 1);
-        // Edit End
-        if (!this.fbo) {
-            console.log("无法设置帧缓冲区对象");
-            return;
-        }
-    }
+在上面有提到在线性情况下，偏微分的值都是常数，则：  
+$$
+\begin{align}
+& \frac{∂(Q·k)}{∂x}=\frac{\Delta(Q·k)}{\Delta x}=\frac{\delta (Q·k)}{\delta x}=dQ \\
+& \frac{∂k}{∂x}=\frac{\Delta k}{\Delta x}=dK \\
+& \frac{∂y}{∂x}=\frac{\Delta y}{\Delta x}=dP \tag{12}
+\end{align}
+$$
+为了方便这里常数分别取名为`dQ`，`dK`，`dP`。有了这些信息后，我们想要的属性就可以通过增量来算得了，假设`Q`为`(Q·k)`的别名，则$Q_{i+1}.z=Q_i.z+δQ_i.z=Q_i.z+\delta x\cdot dQ$，其中`δx==1`，相应的$k_{i+1}=k_i+dK$。  
+代码实现如下：  
+```cpp
+struct Result
+{
+  bool IsHit;
+  vec2 UV;
+  ...
+};
+bool Query(float depth, vec2 uv)
+{
+  float depth1 = -LinearizeDepth(texelFetch(uGDepth,ivec2(uv),0).r);
+  return depth < depth1;
 }
-```
+//DDA,数值方法求解微分方程的算法
+Result RayMarching(Ray ray)
+{
+	Result result;
+  //endPos 不能超出近平面，否则反射出的颜色是错误的。超过的话origin沿dir到近平面的距离 = origin到近平面的最短距离 / cosθ，cosθ = dir.z / r;
+  float rayLength = ((ray.Origin.z + ray.Direction.z * maxDistance) > -uZBufferParams.x) ?
+  (-uZBufferParams.x - ray.Origin.z) / ray.Direction.z : maxDistance;
 
-然后我们把``DirectionalLight.js``中new FBO的那一行加一个参数1，这样ShadowMap的framebuffer就只会有一个color attachment了。
+	vec3 V0 = ray.Origin;
+	vec3 V1 = ray.Origin + ray.Direction * rayLength;
+  //将viewSpace下的origin和endPos转到ClipSpace
+	vec4 H0 = projectToClipSpace(V0);
+	vec4 H1 = projectToClipSpace(V1);
 
-```js
-//Mesh.js
+	float k0 = 1.0 / H0.w;
+  float k1 = 1.0 / H1.w;
+	vec3 Q0 = V0 * k0; 
+  vec3 Q1 = V1 * k1;
 
-static Quad(transform) {
-	const positions = [
-        -1.0,  1.0, 0.0,
-        -1.0, -1.0, 0.0, 
-        1.0,  1.0, 0.0,
-        1.0, -1.0, 0.0,
-	];
+	// NDC-space
+  vec2 P0 = H0.xy * k0;
+  vec2 P1 = H1.xy * k1;
+	vec2 Size = vec2(windowWidth,windowHeight);
+	//Screen Space
+	P0 = (P0 + 1.0) / 2.0 * Size;
+	P1 = (P1 + 1.0) / 2.0 * Size;
 
-	const texcoords = [
-		0.0, 1.0,
-		0.0, 0.0,
-		1.0, 1.0,
-		1.0, 0.0,
-	];
+	vec2 Delta = P1 - P0;
 
-	const indices = [
-		0, 1, 2, 1, 2, 3,    // front
-	];
+  //是否重新排序，我们只处理Delta较大情况
+	bool Permute = false;
+  if (abs(Delta.x) < abs(Delta.y)) { 
+      Permute = true;
+      Delta = Delta.yx; P0 = P0.yx; P1 = P1.yx; 
+  }
+	float StepDir = sign(Delta.x);
+  float Invdx = StepDir / Delta.x;
+	
+  //偏微分的数值表示法
+  vec3  dQ = (Q1 - Q0) * Invdx;
+  float dk = (k1 - k0) * Invdx;
+  vec2  dP = vec2(StepDir, Delta.y * Invdx);
+	float stride = 2.0;//可调
+  dP *= stride; dQ *= stride; dk *= stride;
+  float jitter = 1.0;//可调
+  P0 += dP * jitter; Q0 += dQ * jitter; k0 += dk * jitter;
+	
+	float Step = 0.0;
+	float MaxStep = 1000.0;
+	float EndX = P1.x * StepDir;
 
-	return new Mesh({ name: 'aVertexPosition', array: new Float32Array(positions) }, null, { name: 'aTextureCoord', array: new Float32Array(texcoords) }, indices, transform);
-}
-```
-
-对于生成深度图Mipmap的Pass，我们不需要直接用场景中的mesh作为渲染mesh，因为这个Pass中我们访问的是某一层的深度图Mipmap，我们只需要一个能覆盖整个屏幕的Quad即可，这里给Mesh类手写一个覆盖整个屏幕的Quad的静态函数，后续作为我们生成深度图Mipmap的Pass的渲染Mesh。
-
-```js
-//SceneDepthMaterial.js
-
-class SceneDepthMaterial extends Material {
-
-    constructor(depthTexture, vertexShader, fragmentShader) {    
-        super({
-            'uSampler': { type: 'texture', value: depthTexture },
-            'uDepthMipMap': { type: 'texture', value: null },
-            'uLastMipLevel': { type: '1i', value: -1 },
-            'uLastMipSize': { type: '3fv', value: null },
-            'uCurLevel': { type: '1i', value: 0 },
-        }, [], vertexShader, fragmentShader);
-        this.notShadow = true;
-    }
-}
-
-async function buildSceneDepthMaterial(depthTexture, vertexPath, fragmentPath) {
-
-
-    let vertexShader = await getShaderString(vertexPath);
-    let fragmentShader = await getShaderString(fragmentPath);
-
-    return new SceneDepthMaterial(depthTexture, vertexShader, fragmentShader);
-
-}
-```
-
-作业框架中是有SceneDepthMaterial这个材质的，但并没有使用到，我们就直接用他来作为我们生成深度图Mipmap的Pass的材质，并添加一些后面shader会用到的uniform参数。
-
-```html
-//index.html
-<script src="src/materials/SSRMaterial.js" defer></script>
-<!-- Edit Start -->
-<script src="src/materials/SceneDepthMaterial.js" defer></script>
-<!-- Edit End -->
-```
-
-不要忘记在``index.html``加上对``SceneDepthMaterial.js``的引用。
-
-```js
-//WebGLRenderer.js
-
-class WebGLRenderer {
-    meshes = [];
-    shadowMeshes = [];
-    bufferMeshes = [];
-    lights = [];
-    // Edit Start
-    depthFBOs = [];
-    // Edit End
-
-    // ...
-
-    addMeshRender(mesh) { this.meshes.push(mesh); }
-    addShadowMeshRender(mesh) { this.shadowMeshes.push(mesh); }
-    addBufferMeshRender(mesh) { this.bufferMeshes.push(mesh); }
-    // Edit Start
-    addDepthFBO(fbo) { this.depthFBOs.push(fbo); }
-    // Edit End
-}
-```
-
-因为我们要加一个Pass，那么类似其他的Pass，我们需要提供字段和函数来储存一些数据，这里储存的是FBO，而mesh则使用前面声明过的全局变量``depthMeshRender``，不作为字段添加在这，下面会说怎么使用他们。
-
-```js
-//engine.js
-
-function GAMES202Main() {
-	// ...
-
-	// Add shapes
-	// loadGLTF(renderer, 'assets/cube/', 'cube1', 'SSRMaterial');
-	// loadGLTF(renderer, 'assets/cube/', 'cube2', 'SSRMaterial');
-	loadGLTF(renderer, 'assets/cave/', 'cave', 'SSRMaterial');
-
-	// Edit Start
-	mipMapLevel = 1 + Math.floor(Math.log2(Math.max(window.screen.width, window.screen.height)));
-
-	let currentWidth = window.screen.width;
-	let currentHeight = window.screen.height;
-	let depthTexture = camera.fbo.textures[1];
-
-	for (let i = 0; i < mipMapLevel; i++) {
-		let lastWidth = currentWidth;
-		let lastHeight = currentHeight;
-
-		if(i >0){
-			// calculate next viewport size
-			currentWidth /= 2;
-			currentHeight /= 2;
-
-			currentWidth = Math.floor(currentWidth);
-			currentHeight = Math.floor(currentHeight);
-
-			// ensure that the viewport size is always at least 1x1
-			currentWidth = currentWidth > 0 ? currentWidth : 1;
-			currentHeight = currentHeight > 0 ? currentHeight : 1;
-		}
-		console.log("MipMap Level", i, ":", currentWidth, "x", currentHeight);
-		let fb = new FBO(gl, 1, currentWidth, currentHeight);
-		fb.lastWidth = lastWidth;
-		fb.lastHeight = lastHeight;
-		fb.width = currentWidth;
-		fb.height = currentHeight;
-		renderer.addDepthFBO(fb);
-
+	float k = k0;
+	vec3 Q = Q0;
+  vec2 P = P0;
+	for(;((P.x * StepDir) <= EndX) && 
+      Step < MaxStep;
+      Step+=1.0,P += dP, Q.z += dQ.z, k += dk)
+	{
+		result.UV = Permute ? P.yx : P;
+		float depth;
+    //At any 2D point (x,y), the corresponding 3D point is Q‘(x,y)=(Q·k)(x,y) / k(x,y)，Q’(z)=(Q·k)(z) / k(z)
+		depth = Q.z / k;
+		if(result.UV.x > windowWidth || result.UV.x < 0.0 || result.UV.y > windowHeight || result.UV.y < 0.0)
+			break;
+		result.IsHit = Query(depth, result.UV);
+    if (result.IsHit)
+			break;
 	}
-
-	depthMaterial = buildSceneDepthMaterial(depthTexture, "./src/shaders/sceneDepthShader/depthVertex.glsl", "./src/shaders/sceneDepthShader/depthFragment.glsl");
-	depthMaterial.then((data) => {
-		depthMeshRender = new MeshRender(renderer.gl, Mesh.Quad(setTransform(0, 0, 0, 1, 1, 1)), data);
-	});
-	// Edit End
+	return result;
 }
 ```
+其中需要注意的一点是，`rayLength`光线的长度不能超过近平面，否则会出错，光线长度超出了近平面的范围则用下面等式进行约束:    
+`origin沿dir到近平面的距离 = origin到近平面的最短距离 / cosθ`，`cosθ = dir.z / r`（cartesian to spherical in tangent space）。  
+如果一切顺利，将会得到下面效果图：  
+![13](./README_IMG/image-7.png)  
 
-有了前面的铺垫，我们现在可以生成Mipmap所用的FBO、Material、Mesh了。
+## Hierarchical-Z SSR  
 
-先通过计算算出当前分辨率可以有多少层Mipmap，然后算出每层Mipmap的分辨率，构建出对应分辨率的FBO，然后通过我们上面给WebGLRenderer添加的``addDepthFBO``函数把创建的所有FBO储存到WebGLRenderer的depthFBOs字段中。
+`Hi-Z`是为了优化线性步进的算法，因为步长是固定的，但是大部分时间都浪费在了没有碰撞的空间中。  
+![14](./README_IMG/image-9.png)  
+而`Hi-Z`会根据试探步来判断下一次步长的距离，如果试探步没有与场景相交，那下一次步进的距离就更大，这样求得的交点所使用的步进次数更少，在保证准确率的情况下，效率也得到了极大的提升！  
 
-调用我们改造过的``buildSceneDepthMaterial``函数，创建对应材质，注意这里depthTexture指定的是GBuffer中生成好的深度GBuffer作为第一层Mipmap输入。
+`Hi-Z`方法创建了一个`Depth Mipmap`加速结构，称为`Hi-Z buffer`。该结构本质上是场景深度的四叉树，其中每个四叉树层级中的每个单元格都被设置为上一层级中`4`个单元格的最小值（或最大值，取决于z轴方向）。  
+![15](./README_IMG/image-10.png)  
+值得注意的是，如果行或列不是偶数，采样需要额外多加一列或一行，如果都是奇数，那么还要额外多考虑一个右上角的像素，如图：  
+![16](./README_IMG/image-11.png)  
+这部分代码比较散就不列出来了，理解了这个过程，实现就不难了。  
+`Depth Mipmap`可以用另一个`Pass`来看每一层效果，效果如下：  
+![17](./README_IMG/depth-mipmap.gif)  
+越黑表示越近，纯白色就是深度为`1.0`的情况无限远。  
 
-mesh则是通过上面添加的静态方法``Mesh.Quad``来构建，并赋值给全局变量depthMeshRender。
+有了`Depth Mipmap`，我们还需要屏幕空间的起点和方向。获取这些数据的过程和上一节差不多，代码实现如下：  
+```cpp
+vec3 EvalReflect(vec3 wo,vec2 screenUV) {
+  //从世界坐标中恢复Ts中的原点和反射方向
+  vec3 normalWS = GetGBufferNormalWorld(screenUV);
+  vec3 reflectDir = normalize(reflect(-wo,normalWS));
+  vec3 rayOriginWS = vPosWorld.xyz;
+  vec3 rayEndWS = rayOriginWS + reflectDir * 1.0;
+  vec3 rayOriginVS = projectToViewSpace(rayOriginWS);
+  vec3 rayEndVS    = projectToViewSpace(rayEndWS);
+  vec4 rayOriginCS = projectToClipSpace(rayOriginVS);
+  vec4 rayEndCS    = projectToClipSpace(rayEndVS);
+  rayOriginCS = rayOriginCS.xyzw / rayOriginCS.w;
+  rayEndCS    = rayEndCS.xyzw / rayEndCS.w;
+  vec3 rayOriginTS = (vec3(rayOriginCS) + 1.0) * 0.5;
+  vec3 rayEndTS = (vec3(rayEndCS) + 1.0) * 0.5;
+  vec3 reflectDirTS = normalize(rayEndTS - rayOriginTS);
+  float outMaxDistance = reflectDirTS.x >= 0.0 ? (1.0 - rayOriginTS.x) / reflectDirTS.x  : -rayOriginTS.x / reflectDirTS.x;
+  outMaxDistance = min(outMaxDistance, reflectDirTS.y < 0.0 ? (-rayOriginTS.y / reflectDirTS.y) : ( (1.0-rayOriginTS.y) / reflectDirTS.y));
+  outMaxDistance = min(outMaxDistance, reflectDirTS.z < 0.0 ? (-rayOriginTS.z / reflectDirTS.z) : ((1.0-rayOriginTS.z)/reflectDirTS.z));
+  SSRay ray;
+  ray.rayPosInTS = rayOriginTS;
+  ray.rayDirInTS = reflectDirTS;
+  ray.maxDistance = outMaxDistance;
 
-```js
-//WebGLRenderer.js
-
-class WebGLRenderer {
-    // ...
-
-    render() {
-
-        // Draw light
-        // ...
-
-        // Shadow pass
-        // ...
-
-        // Buffer pass
-        // ...
-
-        // Depth Mipmap pass
-        // Edit Start
-        for (let lv = 0; lv < this.depthFBOs.length && depthMeshRender !=null; lv++) {
-            gl.useProgram(depthMeshRender.shader.program.glShaderProgram);
-            gl.bindFramebuffer(gl.FRAMEBUFFER, this.depthFBOs[lv]);
-            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-
-            let updatedParamters = {
-                "uLastMipLevel": lv - 1,
-                "uLastMipSize": [this.depthFBOs[lv].lastWidth, this.depthFBOs[lv].lastHeight, 0],
-                "uCurLevel": lv,
-            };
-
-            if(lv != 0){
-                updatedParamters.uDepthMipMap = this.depthFBOs[lv - 1].textures[0];
-            }
-
-            depthMeshRender.bindGeometryInfo();
-            depthMeshRender.updateMaterialParameters(updatedParamters);
-            depthMeshRender.bindMaterialParameters();
-            
-            gl.viewport(0, 0, this.depthFBOs[lv].width, this.depthFBOs[lv].height);
-            {
-				const vertexCount = depthMeshRender.mesh.count;
-				const type = gl.UNSIGNED_SHORT;
-				const offset = 0;
-				gl.drawElements(gl.TRIANGLES, vertexCount, type, offset);
-			}
-        }
-        gl.bindTexture(gl.TEXTURE_2D, null);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-        // Edit End
-
-        // Camera pass
-        // ...
-    }
+  vec3 hitPos;
+  vec3 reflectedColor = vec3(0.);
+  if(FindIntersection_HiZ(ray, hitPos)) {
+    reflectedColor = GetGBufferDiffuse(hitPos.xy);
+  }
+  return reflectedColor;
 }
 ```
+这里`outMaxDistance`是防止反射终点超出屏幕而浪费性能。
 
-因为生成深度图Mipmap的pass需要使用GBuffer的深度图作为输入，而Camera pass则需要使用深度图Mipmap来加速，所以生成深度图Mipmap的pass在这两者之间进行。
-
-这里逻辑就是有多少层Mipamp就绘制多少次，每次对应当前的Mipmap等级，并把当前的FBO和等级、分辨率等参数更新到shader中，这里有好些逻辑，其实是从``MeshRender.js``的draw函数中拷贝出来的，都是需要执行相同的逻辑，但这里多了一步需要调用gl.viewport绑定到当前FBO的分辨率。
-
-至此js和WebGL部分工作已完成，接下来到生成深度图Mipmap的shader实现，但在这之前我们还有一个问题要解决，就是我们从WebGL1升级到WebGL2后，我们GLSL可以升级到3.0版本，然后可以使用一些像``texelFetch``、``textureSize``这些旧版本没有的API，以及像位运算等特性，升级后GLSL所用的一些语法也发生了改变，我们需要把要升级shader文件改一下，变动大概如下：
-
-```c
-#version 300 es
+接下来就是重头戏，`FindIntersection_HiZ`函数的实现。  
+该函数核心地方就是试探步如何确定下次步进的距离，先说下这里试探步是怎么处理的，我先把相关代码贴出来，以便参考和解释。  
+```cpp
+vec3 intersectDepthPlane(in vec3 o, in vec3 d, float t){
+  return o + d * t;
+}
+...
+vec3 start = ss_ray.rayPosInTS;
+vec3 rayDir = ss_ray.rayDirInTS;
+float maxTraceDistance = ss_ray.maxDistance;
+vec3 ray = start;
+float minZ = ray.z;
+float maxZ = ray.z + rayDir.z * maxTraceDistance;
+float deltaZ = (maxZ - minZ);
+vec3 o = ray;
+vec3 d = rayDir * maxTraceDistance;
+...
+//步进起点所在单元格的GbufferDepth
+float cell_minZ = getMinimumDepthPlane((oldCellIdx + 0.5) / cellCount, level);    
+//试探步：步进起点的深度小于GbufferDepth，则步进到ray.z >= gbufferDepth的地方，这可能会导致新的tmpRay.xy超过1.0，所以这里只是试探步，实际步进是用intersectCellBoundary这个函数完成。
+vec3 tmpRay = (cell_minZ > ray.z) ? intersectDepthPlane(o, d, (cell_minZ - minZ) / deltaZ) : ray;
 ```
+以反射起点`ray`为例，我们假设这里`ray`已经向`rayDir`步进了一小段距离以防止自相交。我们先看下`intersectDepthPlane`这个函数，以公式`o+t*d`来确定步进后的点，需要注意的是，这里的`d`指代的是非单位向量，即：`光线终点 - 光线起点`。而`t`则是一个归一化的系数在`[0,1]`之间，有了`t`这个系数，这样我们就可以精确的得到起点沿光线步进后的点。  
+下面用图例的形式进一步解释试探步：   
+![18](./README_IMG/image-12.png)  
+可以看到如果起点`A`要试探地走一步，这一步有可能会直接跨出屏幕（假设白色线条代表屏幕的位置），或者跨过了多个像素，从而错过中间可能会相交的点。我们从试探步中得到的信息就是，它这一步是否跨过了起点`A`所在的像素，如果跨过了起点`A`所在的单元格(像素)，那我们就用另一个函数使得起点`A`步进到下一个单元格。需要注意的是这里的单元格和`Depth Mipmap`层级挂钩的，层级越大，一个单元格的步长就越大。  
 
-在GLSL文件第一行声明版本。
+下面我们解释一下如何让起点`A`步进到下一个单元格，还是先看下相关代码：  
+```cpp
+bool FindIntersection_HiZ(
+  in SSRay ss_ray,
+  out vec3 intersection
+) {
+  vec3 start = ss_ray.rayPosInTS;
+  vec3 rayDir = ss_ray.rayDirInTS;
+  float maxTraceDistance = ss_ray.maxDistance;
 
-```c
-// attribute vec3 aVertexPosition;
-// attribute vec3 aNormalPosition;
-// attribute vec2 aTextureCoord;
+  vec2 crossStep = vec2(rayDir.x >= 0.0 ? 1.0 : -1.0, rayDir.y >= 0.0 ? 1.0 : -1.0);
+  vec2 crossOffset = crossStep / vec2(windowWidth,windowHeight) / 128.;
+  //假设reflectDir不与屏幕的宽高平行,如果是向前步进一个单元格的距离，boundary = (rayCell + crossStep )/ cell_count + crossOffset,其中crossOffset > 0.
+  //如果是向后步进一个单元格的距离，boundary = (rayCell + vec(0,0) )/ cell_count + crossOffset,其中crossOffset < 0.
+  crossStep = saturate(crossStep);
 
-layout (location = 0) in vec3 aVertexPosition;
-layout (location = 1) in vec3 aNormalPosition;
-layout (location = 2) in vec2 aTextureCoord;
-```
+  vec3 ray = start;
+  float minZ = ray.z;
+  float maxZ = ray.z + rayDir.z * maxTraceDistance;
+  float deltaZ = (maxZ - minZ);
 
-vertex shader 顶点属性语法修改。
+  vec3 o = ray;
+  vec3 d = rayDir * maxTraceDistance;
 
-```c
-// varying highp vec3 vNormal;
-// varying highp vec2 vTextureCoord;
-// varying highp float vDepth;
+  int startLevel = 2;
+  int stopLevel = 0;
 
-out highp vec3 vNormal;
-out highp vec2 vTextureCoord;
-out highp float vDepth;
+  vec2 startCellCount = vec2(getCellCount(startLevel));
+  //步进起点所在的单元格。
+  vec2 rayCell = getCell(ray.xy, startCellCount);
+  //防止自相交。
+  ray = intersectCellBoundary(o, d, rayCell, startCellCount, crossStep, crossOffset * 128. * 2. );
 
-```
+  int level = startLevel;
+  int iter = 0;
+  ...
 
-vertex shader 输出到fragment shader的变量从varying改成out。
-
-```c
-// varying highp vec3 vNormal;
-// varying highp vec2 vTextureCoord;
-// varying highp float vDepth;
-
-in vec3 vNormal;
-in vec2 vTextureCoord;
-in float vDepth;
-```
-
-fragment shader从vertex shader接受的变量也从varying改成in。
-
-```c
-layout(location = 0) out vec4 Frag0;
-
-void main(){
-  // gl_FragData[0] = vec4(vec3(gl_FragCoord.z) * 100.0, 1.0);
-  Frag0 = vec4(vec3(gl_FragCoord.z) * 100.0, 1.0);
+  while( level >= stopLevel && ray.z <= maxZ  && ++iter < 1000){
+    //获取纹理分辨率
+    vec2 cellCount = vec2(getCellCount(level));
+    //步进起点所在的单元格索引
+    vec2 oldCellIdx = getCell(ray.xy, cellCount);
+    //步进起点所在单元格的GbufferDepth
+    float cell_minZ = getMinimumDepthPlane((oldCellIdx + 0.5) / cellCount, level);
+    if(cell_minZ == 1.0) return false;//解决SSR测试的问题
+    //试探步：步进起点的深度小于GbufferDepth，则步进到ray.z >= gbufferDepth的地方，这可能会导致新的tmpRay.xy超过1.0，所以这里只是试探步，实际步进是用intersectCellBoundary这个函数完成。
+    vec3 tmpRay = (cell_minZ > ray.z) ? intersectDepthPlane(o, d, (cell_minZ - minZ) / deltaZ) : ray;
+    //此次试探步终点所在单元格的索引
+    vec2 newCellIdx = getCell(tmpRay.xy, cellCount);
+    //如果到了第0层级，那么说明马上快要到交点处了，比较深度差值，如果差值大于某个阈值（0.0017），我们还需要在当前层级步进一个单元格。
+    float thickness = level == 0 ? (ray.z - cell_minZ) : 0.;
+    //步进起点和终点不在同一个单元格为true。
+    bool crossed  = (thickness > MAX_THICKNESS)|| crossedCellBoundary(oldCellIdx, newCellIdx);
+    //步进：不在同一个单元格 则寻找最近的一个单元格进行步进,在同一个单元格则步进到试探步的地方。
+    ray = crossed ? intersectCellBoundary(o, d, oldCellIdx, cellCount, crossStep, crossOffset) : tmpRay;
+    //不在同一个单元格 则步进距离再次增大，在同一个单元格则距离减小。
+    level = crossed ? min(MAX_MIPMAP_LEVEL, level + 1): level - 1;
+  }
+  ...
 }
 ```
-
-给framebuffer的某个color attachment输出数据时，不能再用内置变量gl_FragData[]，要先layout声明，然后用声明的变量来赋值。
-
-```c
-out vec4 FragColor;
-
-void main(){
-	//gl_FragColor = vec4(vec3(color.rgb), 1.0);
-    FragColor = vec4(vec3(color.rgb), 1.0);
+可以看到我们用`tmpRay`接收了试探步的位置。下面则是通过`crossedCellBoundary(oldCellIdx, newCellIdx)`来判断`tmpRay`是否和起点`A`在相同单元格。如果不在同一个单元格则`crossed`为`true`，我们需要用`intersectCellBoundary`来使起点`A`步进到下一个单元格。`intersectCellBoundary`函数的代码实现如下：  
+```cpp
+vec3 intersectCellBoundary(
+  vec3 o, 
+  vec3 d, 
+  vec2 rayCell, 
+  vec2 cell_count, 
+  vec2 crossStep, 
+  vec2 crossOffset
+){
+  //光线所在单元格的下一个单元格
+  vec2 index = rayCell + crossStep;
+  //下一个单元格的边界，根据当前level的单元格数量决定
+  vec2 boundary = index / cell_count;
+  //边界偏移一点，防止步进时落在边界上。
+  boundary += crossOffset;
+  //步进的距离
+  vec2 delta = boundary - o.xy;
+  //标准化
+  delta /= d.xy;
+  //选择最小被标准化后的步进值，代表朝着 离现在光线所在单元格最近的一个单元格 步进
+  float t = min(delta.x, delta.y);
+  //步进后的点
+  return intersectDepthPlane(o, d, t);
 }
 ```
+我们看下这个函数相关的参数，`o`为步进起点的位置,`d`为非单位向量,`rayCell`为起点A所在的单元格,`cell_count`为当前Depth Mipmap层级的分辨率,`crossStep`为该单元格向下一个单元格步进的向量,`crossOffset`为微小偏移防止步进后的点落在边界上。下面我还是用图例的形式进一步解释这个函数如何工作的，这里我们忽略z值：  
+![19](./README_IMG/image-13.png)  
+这里`o(0,0.125)`为光线起点，`endPos(1,0.5)`为光线终点，`c(0.45,0.3)`为步进起点，我们要求的点为`nextc`。光线起点`c`所在的单元格`rayCell(1,1)`，这里因为`d(1,0.375)`的两个分量都大于零所以`crossStep`为`(1,1)`，`cell_count`则是当前层级的分辨率为`(4,4)`。  
+`rayCell`根据`crossStep`，移动到下一个单元格，即紫色点所在位置（这里忽略了偏移值）。然后除以`cell_count`得到它们的相对位置即`boundary(0.5,0.5)`。  
+再通过公式`(boundary - o.xy) / d.xy`来确定归一化的系数`t`，通过图例和计算我们很容易的观察到，此时`x`分量的系数`t`是`y`分量的`0.5`倍，即光线`d`需要走到`endPos`，`nextc`的`y`分量才和`boundary`的`y`分量相等，而这并不是我们想要的，所以我们这里选择系数相对较小的来步进，这样通过公式`o+t*d`就可以准确得到步进到下一个单元格的相对坐标了（这里红色点和蓝色点应该在光线`d`上面，这里为了取值方便没有画在一起）。  
+同理当步进起点向反方向步进时，将`o`和`endPos`反过来，并且`crossStep`为`(0,0)`时也可以得到步进后的点，这里就不再解释了。  
 
-fragment shader输出最终颜色，不能直接给gl_FragColor赋值，要先用out声明一个变量，再给该变量赋值。
+还有最后一件事情没做，我们上面讨论的情况只适用于向前追踪，如果向后追踪，即向`nearPlane`步进，直接用上面的算法会出错。这是因为试探步函数`intersectDepthPlane(o, d, (cell_minZ - minZ) / deltaZ)`，处理不了向后步进的情况，我们看下这个`cell_minZ`变量，如果是向后步进，这个变量的值只会一直递减，相应的系数`t`也会一直递减，从而无法完成试探步 步进的工作。但是幸运的是，向后追踪的情况比向前追踪简单，我们只需要用一个方向布尔变量来控制算法流程。  
+在每次迭代中，我们得到了步进起点所对应的`Depth Mipmap`场景深度`cell_minZ`，当场景深度大于步进起点深度时，我们就调用`intersectCellBoundary`来步进到下一个单元格，而不需要经过试探步来决定。  
+整个`Hi-z`算法代码实现如下：   
+```cpp
+bool FindIntersection_HiZ(
+  in SSRay ss_ray,
+  out vec3 intersection
+) {
+  vec3 start = ss_ray.rayPosInTS;
+  vec3 rayDir = ss_ray.rayDirInTS;
+  float maxTraceDistance = ss_ray.maxDistance;
 
-并不是每一个shader都需要改，可以只改需要用到新版本功能的shader，但有些特性在新版本被废弃了的也得改，具体修改就不贴了，可以看文章开头的github链接里有源码，我是把所有shader都升了版本了。
+  vec2 crossStep = vec2(rayDir.x >= 0.0 ? 1.0 : -1.0, rayDir.y >= 0.0 ? 1.0 : -1.0);
+  vec2 crossOffset = crossStep / vec2(windowWidth,windowHeight) / 128.;
+  //假设reflectDir不与屏幕的宽高平行,如果是向前步进一个单元格的距离，boundary = (rayCell + crossStep )/ cell_count + crossOffset,其中crossOffset > 0.
+  //如果是向后步进一个单元格的距离，boundary = (rayCell + vec(0,0) )/ cell_count + crossOffset,其中crossOffset < 0.
+  crossStep = saturate(crossStep);
 
-下面是生成深度图Mipmap的shader实现：
+  vec3 ray = start;
+  float minZ = ray.z;
+  float maxZ = ray.z + rayDir.z * maxTraceDistance;
+  float deltaZ = (maxZ - minZ);
 
-```c
-//depthVertex.glsl
+  vec3 o = ray;
+  vec3 d = rayDir * maxTraceDistance;
 
-#version 300 es
+  int startLevel = 2;
+  int stopLevel = 0;
 
-layout (location = 0) in vec3 aVertexPosition;
-// layout (location = 1) in vec3 aNormalPosition;
-layout (location = 1) in vec2 aTextureCoord;
+  vec2 startCellCount = vec2(getCellCount(startLevel));
+  //步进起点所在的单元格。
+  vec2 rayCell = getCell(ray.xy, startCellCount);
+  //防止自相交。
+  ray = intersectCellBoundary(o, d, rayCell, startCellCount, crossStep, crossOffset * 128. * 2. );
 
-out vec2 vTextureCoord;
-
-void main(void) {
-  vTextureCoord = aTextureCoord;
-  gl_Position = vec4(aVertexPosition, 1.0);
+  int level = startLevel;
+  int iter = 0;
+  bool isBackwardRay = rayDir.z < 0.;
+  float Dir = isBackwardRay ? -1. : 1.;
+  while( level >= stopLevel && ray.z * Dir <= maxZ * Dir && ++iter < 1000){
+    //获取纹理分辨率
+    vec2 cellCount = vec2(getCellCount(level));
+    //步进起点所在的单元格索引
+    vec2 oldCellIdx = getCell(ray.xy, cellCount);
+    //步进起点所在单元格的GbufferDepth
+    float cell_minZ = getMinimumDepthPlane((oldCellIdx + 0.5) / cellCount, level);
+    if(cell_minZ == 1.0) return false;//解决SSR测试的问题
+    //试探步：步进起点的深度小于GbufferDepth，则步进到ray.z >= gbufferDepth的地方，这可能会导致新的tmpRay.xy超过1.0，所以这里只是试探步，实际步进是用intersectCellBoundary这个函数完成。
+    vec3 tmpRay = ((cell_minZ > ray.z) && !isBackwardRay) ? intersectDepthPlane(o, d, (cell_minZ - minZ) / deltaZ) : ray;
+    //此次试探步终点所在单元格的索引
+    vec2 newCellIdx = getCell(tmpRay.xy, cellCount);
+    //如果到了第0层级，那么说明马上快要到交点处了，比较深度差值，如果差值大于某个阈值（0.0017），我们还需要在当前层级步进一个单元格。
+    float thickness = level == 0 ? (ray.z - cell_minZ) : 0.;
+    //步进起点和终点不在同一个单元格为true。
+    bool crossed  = (isBackwardRay && (cell_minZ > ray.z))||(thickness > MAX_THICKNESS)|| crossedCellBoundary(oldCellIdx, newCellIdx);
+    //步进：不在同一个单元格 则寻找最近的一个单元格进行步进,在同一个单元格则步进到试探步的地方。
+    //前向追踪不适合用在后向追踪，如果是backwardRay，没有试探步。cell_minZ > ray.z为true则步进到下一个单元格level + 1，false则保留当前状态level - 1；
+    ray = crossed ? intersectCellBoundary(o, d, oldCellIdx, cellCount, crossStep, crossOffset) : tmpRay;
+    //不在同一个单元格 则步进距离再次增大，在同一个单元格则距离减小。
+    level = crossed ? min(MAX_MIPMAP_LEVEL, level + 1): level - 1;
+  }
+  bool intersected = (level < stopLevel);
+  intersection = intersected ? ray : vec3(0.0);
+  return intersected;
 }
 ```
-
-vertex shader实现。
-
-```c
-//depthFragment.glsl
-
-#version 300 es
-
-#ifdef GL_ES
-precision mediump float;
-#endif
-
-uniform vec3 uLightPos;
-uniform vec3 uCameraPos;
-uniform sampler2D uSampler;
-
-uniform sampler2D uDepthMipMap;
-uniform int uLastMipLevel;
-uniform vec3 uLastMipSize;
-uniform int uCurLevel;
-
-in vec2 vTextureCoord;
-
-out vec4 FragColor;
-
-vec4 pack (float depth) {
-    // 使用rgba 4字节共32位来存储z值,1个字节精度为1/256
-    const vec4 bitShift = vec4(1.0, 256.0, 256.0 * 256.0, 256.0 * 256.0 * 256.0);
-    const vec4 bitMask = vec4(1.0/256.0, 1.0/256.0, 1.0/256.0, 0.0);
-    // gl_FragCoord:片元的坐标,fract():返回数值的小数部分
-    vec4 rgbaDepth = fract(depth * bitShift); //计算每个点的z值
-    rgbaDepth -= rgbaDepth.gbaa * bitMask; // Cut off the value which do not fit in 8 bits
-    return rgbaDepth;
-}
-
-
-
-void main(){
-    if(uCurLevel == 0){
-        vec3 color = texture(uSampler, vTextureCoord).rgb;
-        FragColor = vec4(color, 1.0);
-    }else{
-
-    ivec2 thisLevelTexelCoord = ivec2(gl_FragCoord);
-    ivec2 previousLevelBaseTexelCoord = thisLevelTexelCoord * 2;
-
-    vec4 depthTexelValues;
-    depthTexelValues.x = texelFetch(uDepthMipMap,
-                                      previousLevelBaseTexelCoord,
-                                      0).r;
-    depthTexelValues.y = texelFetch(uDepthMipMap,
-                                      previousLevelBaseTexelCoord + ivec2(1, 0),
-                                      0).r;
-    depthTexelValues.z = texelFetch(uDepthMipMap,
-                                      previousLevelBaseTexelCoord + ivec2(1, 1),
-                                      0).r;
-    depthTexelValues.w = texelFetch(uDepthMipMap,
-                                      previousLevelBaseTexelCoord + ivec2(0, 1),
-                                      0).r;
-
-    float minDepth = min(min(depthTexelValues.x, depthTexelValues.y),
-                          min(depthTexelValues.z, depthTexelValues.w));
-
-    // Incorporate additional texels if the previous level's width or height (or both)
-    // are odd.
-    ivec2 u_previousLevelDimensions = ivec2(uLastMipSize.x, uLastMipSize.y);
-    bool shouldIncludeExtraColumnFromPreviousLevel = ((u_previousLevelDimensions.x & 1) != 0);
-    bool shouldIncludeExtraRowFromPreviousLevel = ((u_previousLevelDimensions.y & 1) != 0);
-    if (shouldIncludeExtraColumnFromPreviousLevel) {
-      vec2 extraColumnTexelValues;
-      extraColumnTexelValues.x = texelFetch(uDepthMipMap,
-                                                previousLevelBaseTexelCoord + ivec2(2, 0),
-                                                0).r;
-      extraColumnTexelValues.y = texelFetch(uDepthMipMap,
-                                                previousLevelBaseTexelCoord + ivec2(2, 1),
-                                                0).r;
-
-      // In the case where the width and height are both odd, need to include the
-          // 'corner' value as well.
-      if (shouldIncludeExtraRowFromPreviousLevel) {
-        float cornerTexelValue = texelFetch(uDepthMipMap,
-                                                  previousLevelBaseTexelCoord + ivec2(2, 2),
-                                                  0).r;
-        minDepth = min(minDepth, cornerTexelValue);
-      }
-      minDepth = min(minDepth, min(extraColumnTexelValues.x, extraColumnTexelValues.y));
-    }
-    if (shouldIncludeExtraRowFromPreviousLevel) {
-      vec2 extraRowTexelValues;
-      extraRowTexelValues.x = texelFetch(uDepthMipMap,
-                                            previousLevelBaseTexelCoord + ivec2(0, 2),
-                                            0).r;
-      extraRowTexelValues.y = texelFetch(uDepthMipMap,
-                                            previousLevelBaseTexelCoord + ivec2(1, 2),
-                                            0).r;
-      minDepth = min(minDepth, min(extraRowTexelValues.x, extraRowTexelValues.y));
-    }
-
-    FragColor = vec4(vec3(minDepth), 1.0);
-    }
-}
-```
-
-[Hierarchical Depth Buffers](https://miketuritzin.com/post/hierarchical-depth-buffers/)
-
-fragment shader实现，这里其实是直接“借鉴”上面这篇文章的实现，配合原文应该很好理解，不多做解释了。
-
-![](https://github.com/DrFlower/GAMES_101_202_Homework/blob/main/Homework_202/Assignment3/README_IMG/games202-homework3_depth_mipmap.gif)
-
-生成出来的每一层的Mipmap效果预览如上图，因为每提升一个等级，都是取之前一个等级的四周像素的最小值，所以可以看到随着等级提升，黑色像素块是会逐渐“侵占”白色像素块的。
-
-注意这里不是深度图的原图，这里为了可视化效果，临时压缩了深度值，不然用GBuffer的原图的话，有深度的地方都是一片白的，并不好示意效果。
-
-另外这里还有点不太对的地方时，上面空缺的那一块应该是默认白色才对，也就是没物体的地方默认最大深度。这里我暂时没改，最好应该是在给GBuffer的framebuffer调用clear的时候默认颜色是白色，但是似乎会把所有GBuffer都默认白色了，不知道能不能设定只给某个color attachment默认白色，后来我又尝试在深度生成的shader中判断如果深度值太小，就当成白色，结果测试发现帧率还降了点。这个问题暂时先不深究了。
-
-#### 基于Mipmap加速的Raymarch实现
-
-要在``ssrFragment``中实现基于Mipmap加速的Raymarch，我们要先把深度图Mipmap都传递过去。
-
-```js
-//SSRMaterial.js
-
-class SSRMaterial extends Material {
-    constructor(diffuseMap, specularMap, light, camera, vertexShader, fragmentShader) {
-        let lightIntensity = light.mat.GetIntensity();
-        let lightVP = light.CalcLightVP();
-        let lightDir = light.CalcShadingDirection();
-
-        // Edit Start
-        let uniforms = {
-            'uLightRadiance': { type: '3fv', value: lightIntensity },
-            'uLightDir': { type: '3fv', value: lightDir },
-
-            'uGDiffuse': { type: 'texture', value: camera.fbo.textures[0] },
-            'uGDepth': { type: 'texture', value: camera.fbo.textures[1] },
-            'uGNormalWorld': { type: 'texture', value: camera.fbo.textures[2] },
-            'uGShadow': { type: 'texture', value: camera.fbo.textures[3] },
-            'uGPosWorld': { type: 'texture', value: camera.fbo.textures[4] },
-        }
-
-        for(let i = 0; i < mipMapLevel; i++){
-            uniforms['uDepthTexture' + '[' + i + ']'] = { type: 'texture', value: null };
-        }
-
-        super(uniforms, [], vertexShader, fragmentShader);
-        // Edit End
-    }
-}
-
-```
-
-在材质构造时，先初始化uDepthTexture数组作为我们后续传入深度图Mipmap的容器。
-
-```js
-//WebGLRenderer.js
-
-// Camera pass
-for (let i = 0; i < this.meshes.length; i++) {
-    // Edit Start
-    for(let lv = 0; lv < mipMapLevel; lv++){
-        if(this.depthFBOs.length > lv){
-            updatedParamters['uDepthTexture' + '[' + lv + ']'] = this.depthFBOs[lv].textures[0];
-        }
-    }
-    // Edit End
-    this.meshes[i].draw(this.camera, null, updatedParamters);
-}
-```
-
-在这个材质Draw的时候，再把对应等级的Mipmap传递到数组对应索引的位置上。
-
-然后就是带Hiz优化的RayMarch实现了，这里的最佳实现应该是在当前等级的Mipmap的贴图空间中进行步进，每次步进到下一个相邻的像素，因为我们的精度是对应深度贴图的像素精度的，如果我们每次步进的是一个像素可以确保我们每次都是有效步进，而不会因为精度问题步进完还在同一个像素中，用同一个深度值重复做比较。
-
-[Screen Space Reflections : Implementation and optimization – Part 2 : HI-Z Tracing Method](https://sugulee.wordpress.com/2021/01/19/screen-space-reflections-implementation-and-optimization-part-2-hi-z-tracing-method/)
-
-这篇文章所说的实现方式应该是比较高效的方式，很遗憾，我这次没“借鉴”成功，最后没能正常判断与场景物体的相交，尝试实现的代码也在文章开头的github仓库中，希望有热心同学能帮忙看下。
-
-下面是我自己的简易实现：
-
-```c
-float getMinimumDepthPlane(vec2 pos, int level){
-  vec2 cellCount = vec2(getCellCount(level));
-  ivec2 cell = ivec2(floor(pos * cellCount));
-
-  if(level == 0){
-    return texelFetch(uDepthTexture[0], cell, 0).x;
-  }
-  else if(level == 1){
-    return texelFetch(uDepthTexture[1], cell, 0).x;
-  }
-  else if(level == 2){
-    return texelFetch(uDepthTexture[2], cell, 0).x;
-  }
-    else if(level == 3){
-    return texelFetch(uDepthTexture[3], cell, 0).x;
-  }
-    else if(level == 4){
-    return texelFetch(uDepthTexture[4], cell, 0).x;
-  }
-    else if(level == 5){
-    return texelFetch(uDepthTexture[5], cell, 0).x;
-  }
-    else if(level == 6){
-    return texelFetch(uDepthTexture[6], cell, 0).x;
-  }
-    else if(level == 7){
-    return texelFetch(uDepthTexture[7], cell, 0).x;
-  }
-    else if(level == 8){
-    return texelFetch(uDepthTexture[8], cell, 0).x;
-  }
-    else if(level == 9){
-    return texelFetch(uDepthTexture[9], cell, 0).x;
-  }
-    else if(level == 10){
-    return texelFetch(uDepthTexture[10], cell, 0).x;
-  }
-    else if(level == 11){
-    return texelFetch(uDepthTexture[11], cell, 0).x;
-  }
-
-    return texelFetch(uDepthTexture[0], cell, 0).x;
-}
-```
-
-先实现一个函数，函数传入指定深度图Mipmap等级，指定位置，并返回对应深度值的，这里实现得比较挫，因为如果我直接用level去索引uDepthTexture，会报错``array index for samplers must be constant integral expressions``，所以暂时就先这样写了，不深究。
-
-```c
-#define MAX_MIPMAP_LEVEL 11
-
-bool RayMarch_Hiz(vec3 ori, vec3 dir, out vec3 hitPos) {
-    float step = 0.05;
-    float maxDistance = 7.5;
-
-    int startLevel = 2;
-    int stopLevel = 0;
-
-    vec3 curPos = ori;
-    int level = startLevel;
-    while(level >= stopLevel && distance(ori, curPos) < maxDistance){
-        float rayDepth = GetDepth(curPos);
-        vec2 screenUV = GetScreenCoordinate(curPos);
-        float gBufferDepth = getMinimumDepthPlane(screenUV, level);
-
-        if(rayDepth - gBufferDepth > 0.0001){
-          if(level == 0){
-            hitPos = curPos;
-            return true;
-          }
-          else{
-            level = level - 1;
-          }
-        }
-        else{
-          level = min(MAX_MIPMAP_LEVEL, level + 1);
-          vec3 stepDistance = (dir * step * float(level + 1));
-          curPos += stepDistance;
-        }
-    }
-    return false;
-}
-```
-
-最后我自己交出的简易实现是这样的，使用上很简单，在之前调用RayMarch的地方替换成调用这个RayMarch_Hiz即可，与没有Mipmap优化的RayMarch区别主要就两点：
-
-1. 步进距离动态随着mipmap level增大而增大。
-2. 从限制最大步进次数改成限制最大步进距离，这样才能有效吃上动态步进距离的优化。
-
-写完新的RayMarch实现是需要在前面SSR场景中验证一下步进方向是否正确的，否则在这个cave间接光场景不好观察是否正确，写错了都不知道。把步进方向从上半球采样方向和改成镜面反射方向，把间接光计算改成直接取交点的Diffuse即可。
-
-![](https://github.com/DrFlower/GAMES_101_202_Homework/blob/main/Homework_202/Assignment3/README_IMG/games202-homework3_raymarch_hiz_ssr_test.png)
-
-测试OK。
-
-下面对比一下运行效果吧，环境是2560x1440分辨率，1070ti的桌面显卡。
-
-![](https://github.com/DrFlower/GAMES_101_202_Homework/blob/main/Homework_202/Assignment3/README_IMG/games202-homework3_cave_sample_num_1.png)
-
-这是SAMPLE_NUM取1时的场景效果。
-
-![](https://github.com/DrFlower/GAMES_101_202_Homework/blob/main/Homework_202/Assignment3/README_IMG/games202-homework3_raymarch_fps.png)
-
-这是没有hiz优化的RayMarch的帧率，8.59 FPS。
-
-![](https://github.com/DrFlower/GAMES_101_202_Homework/blob/main/Homework_202/Assignment3/README_IMG/games202-homework3_raymarch_hiz_fps.png)
-
-这是有hiz优化的RayMarch_Hiz的帧率，16.86 PS。
-
-可以看到优化效果还是非常显著的，帧率基本翻倍了，由于时间预算不足，这个作业没有交出让自己满意的实现，但整体上还是完成了作业的要求的。
-
-最后贴一张SAMPLE_NUM为32时的效果吧！
-
-![](https://github.com/DrFlower/GAMES_101_202_Homework/blob/main/Homework_202/Assignment3/README_IMG/games202-homework3_final.png)
+这里`thickness`是为了让光线穿过物体。不然我们会得到一些错误的结果。  
+
+这节的内容将的有点`HighLevel`，更多细节可以参考[Hierarchical-Z SSR](https://sugulee.wordpress.com/2021/01/19/screen-space-reflections-implementation-and-optimization-part-2-hi-z-tracing-method/)。  
+如果一切顺利，就会得到下面的效果：  
+![20](./README_IMG/image-14.png)  
+全局光照如何处理在上面`World Space Ray Marching SSR`已经讲过，这里只需要照着做就行。

@@ -63,7 +63,7 @@ Attribute::~Attribute () {}
 
 namespace {
 
-struct NameCompare: std::binary_function <const char *, const char *, bool>
+struct NameCompare
 {
     bool
     operator () (const char *x, const char *y) const
@@ -88,15 +88,8 @@ class LockedTypeMap: public TypeMap
 LockedTypeMap &
 typeMap ()
 {
-    static Mutex criticalSection;
-    Lock lock (criticalSection);
-
-    static LockedTypeMap* typeMap = 0;
-
-    if (typeMap == 0)
-	typeMap = new LockedTypeMap ();
-
-    return *typeMap;
+    static LockedTypeMap tMap;
+    return tMap;
 }
 
 

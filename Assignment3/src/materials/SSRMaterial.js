@@ -3,7 +3,6 @@ class SSRMaterial extends Material {
         let lightIntensity = light.mat.GetIntensity();
         let lightDir = light.CalcShadingDirection();
 
-        // Edit Start
         let uniforms = {
             'uLightRadiance': { type: '3fv', value: lightIntensity },
             'uLightDir': { type: '3fv', value: lightDir },
@@ -20,7 +19,6 @@ class SSRMaterial extends Material {
         }
 
         super(uniforms, [], vertexShader, fragmentShader);
-        // Edit End
     }
 }
 

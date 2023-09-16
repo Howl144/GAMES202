@@ -1,15 +1,10 @@
 var gl, gl_draw_buffers;
 
-var bufferFBO;
-var bumpMap;
-
-// Edit Start
-var windowWidth;//用于FBO设置宽
-var windowHeight;//用于FBO设置高
-var mipMapLevel;//用于SSR材质设置uniform
+var windowWidth;//FBO设置宽
+var windowHeight;//FBO设置高
+var mipMapLevel;//SSR pass  
 var depthMeshRender;//Depth Mipmap pass
 var depthDebugMeshRender;//debugeDepth pass
-// Edit End
 
 GAMES202Main();
 
@@ -19,7 +14,6 @@ function GAMES202Main() {
 	canvas.width = window.screen.width;
 	canvas.height = window.screen.height;
 
-	// Edit Start
 	windowWidth = window.screen.width;
 	windowHeight = window.screen.height;
 
@@ -28,13 +22,12 @@ function GAMES202Main() {
 		alert('Unable to initialize WebGL. Your browser or machine may not support it.');
 		return;
 	}
-
-	let ext = gl.getExtension('EXT_color_buffer_float')
+	//support for gl.texImage2D(..., gl.RGBA32F, ..., gl.FLOAT,...);
+	let ext = gl.getExtension('EXT_color_buffer_float');
 	if (!ext) {
 		alert("Need EXT_color_buffer_float");
 		return;
 	}
-	// Edit End
 
 	// Add camera
 	let near = 1e-3;
@@ -48,29 +41,29 @@ function GAMES202Main() {
 
 
 
-	// // Cube
-	// cameraPosition = [6, 1, 0]
-	// cameraTarget = [0, 0, 0]
-	// // Cube
-	// lightRadiance = [1, 1, 1];
-	// lightPos = [-2, 4, 1];
-	// lightDir = {
-	// 	'x': 0.4,
-	// 	'y': -0.9,
-	// 	'z': -0.2,
-	// };
-
-	// Cave
-	lightRadiance = [20, 20, 20];
-	lightPos = [-0.45, 5.40507, 0.637043];
+	// Cube
+	cameraPosition = [6, 1, 0]
+	cameraTarget = [0, 0, 0]
+	// Cube
+	lightRadiance = [1, 1, 1];
+	lightPos = [-2, 4, 1];
 	lightDir = {
-		'x': 0.39048811,
-		'y': -0.89896828,
-		'z': 0.19843153,
+		'x': 0.4,
+		'y': -0.9,
+		'z': -0.2,
 	};
-	//Cave
-	cameraPosition = [4.18927, 1.0313, 2.07331]
-	cameraTarget = [2.92191, 0.98, 1.55037]
+
+	// // Cave
+	// lightRadiance = [20, 20, 20];
+	// lightPos = [-0.45, 5.40507, 0.637043];
+	// lightDir = {
+	// 	'x': 0.39048811,
+	// 	'y': -0.89896828,
+	// 	'z': 0.19843153,
+	// };
+	// //Cave
+	// cameraPosition = [4.18927, 1.0313, 2.07331]
+	// cameraTarget = [2.92191, 0.98, 1.55037]
 
 	
 	
@@ -108,10 +101,9 @@ function GAMES202Main() {
 	let ssrFragTextrueSpace = "./src/shaders/ssrShader/ssrFragment_TextureSpace.glsl";
 	let ssrFragHizTextureSpace = "./src/shaders/ssrShader/ssrFragment_HizTextureSpace.glsl";
 	loadGLTF(renderer, 'assets/cube/', 'cube1', 'SSRMaterial',uZBufferParams,ssrFragHizTextureSpace);
-	// loadGLTF(renderer, 'assets/cube/', 'cube2', 'SSRMaterial',uZBufferParams,ssrFragWorldSpace);
+	// loadGLTF(renderer, 'assets/cube/', 'cube2', 'SSRMaterial',uZBufferParams,ssrFragHizTextureSpace);
 	// loadGLTF(renderer, 'assets/cave/', 'cave', 'SSRMaterial',uZBufferParams,ssrFragHizTextureSpace);
- 
-	// Edit Start
+
 	// mipMapLevel = 5;
 	mipMapLevel = Math.floor(Math.log2(Math.max(window.screen.width, window.screen.height)));
 
@@ -153,7 +145,6 @@ function GAMES202Main() {
 	depthDebugMaterial.then((data) => {
 		depthDebugMeshRender = new MeshRender(renderer.gl, Mesh.Quad(setTransform(0, 0, 0, 1, 1, 1)), data);
 	});
-	// Edit End
 
 	function createGUI() {
 		const gui = new dat.gui.GUI();
@@ -165,7 +156,7 @@ function GAMES202Main() {
 	}
 	createGUI();
 
-	//Edit Start deltaTime实现
+	//deltaTime实现
 	let prevTime = 0;
 	var frames = 0;
     var updateTime = 0;
@@ -184,7 +175,6 @@ function GAMES202Main() {
 		requestAnimationFrame(mainLoop);
 		prevTime = now;
 	}
-	//Edit End
 	requestAnimationFrame(mainLoop);
 }
 
