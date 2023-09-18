@@ -3,7 +3,8 @@
 ## 介绍  
 
 用`webgl`和`CPP`实现`games202`所提到的实时渲染的相关算法。为了节省存储空间，Github仓库未包含代码的原理解释等。  
-电脑GPU`（GPU AMD Radeon(TM) 530）`很拉，部分结果无法更好展示，抱歉了😞。
+电脑GPU`（GPU AMD Radeon(TM) 530）`很拉，部分结果无法更好展示，抱歉了😞。  
+如果该项目对你有帮助，请给个星星吧😝~
 
 ## 1. Percentage Closer Soft Shadows   
 
