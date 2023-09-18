@@ -2,7 +2,6 @@ var cameraPosition = [30, 30, 30]
 
 //生成的纹理的分辨率，纹理必须是标准的尺寸 256*256 1024*1024  2048*2048
 var resolution = 2048;
-var fbo;
 
 GAMES202Main();
 
@@ -44,32 +43,30 @@ function GAMES202Main() {
 
 	
 	// Add lights
-	// light - is open shadow map == true
 	let focalPoint = [0, 0, 0];
 	let lightUp = [0, 1, 0]
 	//第一个光源的亮度
 	let lightPos1 = [0, 0, 40];
-	const pointLight = new PointLight(10, [1, 1, 1], lightPos1, focalPoint, lightUp, true, renderer.gl);
+	const pointLight = new PointLight(2, [1, 1, 1], lightPos1, focalPoint, lightUp, true, renderer.gl);
 	renderer.addLight(pointLight);
 	//添加第二个光源
 	let lightPos2 = [0, 0, -40];
-	const pointLight2 = new PointLight(10, [1, 1, 1], lightPos2, focalPoint, lightUp, true, renderer.gl);
+	const pointLight2 = new PointLight(2, [1, 1, 1], lightPos2, focalPoint, lightUp, true, renderer.gl);
 	renderer.addLight(pointLight2);
 	//添加第三个光源
 	let lightPos3 = [40, 0, 0];
-	const pointLight3 = new PointLight(10, [1, 1, 1], lightPos3, focalPoint, lightUp, true, renderer.gl);
+	const pointLight3 = new PointLight(2, [1, 1, 1], lightPos3, focalPoint, lightUp, true, renderer.gl);
 	renderer.addLight(pointLight3);
 	//添加第四个光源
 	let lightPos4 = [-40, 0, 0];
-	const pointLight4 = new PointLight(10, [1, 1, 1], lightPos4, focalPoint, lightUp, true, renderer.gl);
+	const pointLight4 = new PointLight(2, [1, 1, 1], lightPos4, focalPoint, lightUp, true, renderer.gl);
 	renderer.addLight(pointLight4);
 
 
 	// Add shapes
-	//Edit Start 添加缩放参数
+	// 添加缩放参数
 	let floorTransform = setTransform(0, 0, 0, 0, 0, 0, 6, 6, 6);
 	let obj1Transform = setTransform(0, 0, 0, 0, 0, 0, 10, 10, 10);
-	//Edit End
 
 	loadOBJ(renderer, 'assets/mary/', 'Marry', 'PhongMaterial', obj1Transform);
 	loadOBJ(renderer, 'assets/floor/', 'floor', 'PhongMaterial', floorTransform);
@@ -82,7 +79,7 @@ function GAMES202Main() {
 	// }
 	// createGUI();
 
-	//Edit Start deltaTime实现
+	// deltaTime实现
 	let prevTime = 0;
 
 	function mainLoop(now) {
@@ -92,22 +89,21 @@ function GAMES202Main() {
 		requestAnimationFrame(mainLoop);
 		prevTime = now;
 	}
-	//Edit End
+	
 	requestAnimationFrame(mainLoop);
 }
 
-//Edit Start 添加rotate参数
+// 添加rotate参数
 function setTransform(t_x, t_y, t_z, r_x, r_y, r_z, s_x, s_y, s_z) {
-//Edit End
+
 	return {
 		modelTransX: t_x,
 		modelTransY: t_y,
 		modelTransZ: t_z,
-		//Edit Start
 		modelRotateX: r_x,
 		modelRotateY: r_y,
 		modelRotateZ: r_z,
-		//Edit End
+		
 		modelScaleX: s_x,
 		modelScaleY: s_y,
 		modelScaleZ: s_z,
@@ -115,9 +111,7 @@ function setTransform(t_x, t_y, t_z, r_x, r_y, r_z, s_x, s_y, s_z) {
 }
 
 
-//Edit Start
 //角度转弧度
 function degrees2Radians(degrees){
 	return 3.1415927 / 180 * degrees;
 }
-//Edit End

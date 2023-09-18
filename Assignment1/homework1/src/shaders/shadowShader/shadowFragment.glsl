@@ -21,6 +21,6 @@ void main(){
   float lightDistance = length(worldPos - uLightPos);
   float fragDepth = lightDistance / uLightFarPlane;
   gl_FragColor = pack(fragDepth);
-  //正交投影直接赋值
+  //正交投影屏幕空间深度信息是线性的，直接赋值。
   // gl_FragColor = pack(gl_FragCoord.z);
 }

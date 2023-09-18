@@ -119,22 +119,22 @@ async function GAMES202Main() {
 	}
 
 	// TODO: load model - Add your Material here
-	// Edit Start
+	
 	let maryTransform = setTransform(0, -65, 0, 40, 40, 40);
 	loadOBJ(renderer, 'assets/mary/', 'mary', 'PRTMaterial', maryTransform);
-	// Edit End
+	
 
 	function createGUI() {
 		const gui = new dat.gui.GUI();
 		const panelModel = gui.addFolder('Switch Environemtn Map');
-		// Edit Start
+		
 		panelModel.add(guiParams, 'envmapId', { 
 			'GraceGathedral_DI': 0, 'GraceGathedral_GI': 1, 
 			'Indoor_DI': 2, 'Indoor_GI': 3, 
 			'Skybox_DI': 4, 'Skybox_GI': 5,
 			'CornellBox_DI': 6,'CornellBox_GI': 7
 		}).name('Envmap Name');
-		// Edit End
+		
 		panelModel.open();
 	}
 

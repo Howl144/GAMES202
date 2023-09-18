@@ -44,23 +44,22 @@ function loadOBJ(renderer, path, name, objMaterial, transform) {
 
 							let material, shadowMaterial;
 							let Translation = [transform.modelTransX, transform.modelTransY, transform.modelTransZ];
-							//Edit Start 添加旋转参数
+							// 添加旋转参数
 							let Rotation = [transform.modelRotateX, transform.modelRotateY, transform.modelRotateZ];
-							//Edit End
+							
 							let Scale = [transform.modelScaleX, transform.modelScaleY, transform.modelScaleZ];
 
-							//Edit Start 原本只添加第一个light的材质，改成添加所有light的材质，并添加旋转参数
+							// 原本只添加第一个light的材质，改成添加所有light的材质，并添加旋转参数
 							for(let i = 0; i < renderer.lights.length; i++){
 								let light = renderer.lights[i].entity;
 								switch (objMaterial) {
 									case 'PhongMaterial':
-										//Edit Start 添加旋转参数、光源索引参数
+										// 添加旋转参数、光源索引参数
 										material = buildPhongMaterial(colorMap, mat.specular.toArray(), light, Translation, Rotation, Scale, i, "./src/shaders/phongShader/phongVertex.glsl", "./src/shaders/phongShader/phongFragment.glsl");
 										shadowMaterial = buildShadowMaterial(light, Translation, Rotation, Scale, i, "./src/shaders/shadowShader/shadowVertex.glsl", "./src/shaders/shadowShader/shadowFragment.glsl");
-										//Edit End
+										
 										break;
 								}
-							
 								material.then((data) => {
 									let meshRender = new MeshRender(renderer.gl, mesh, data);
 									renderer.addMeshRender(meshRender);
@@ -70,7 +69,7 @@ function loadOBJ(renderer, path, name, objMaterial, transform) {
 									renderer.addShadowMeshRender(shadowMeshRender);
 								});
 							}
-							//Edit End
+							
 						}
 					});
 				}, onProgress, onError);

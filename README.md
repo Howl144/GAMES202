@@ -2,24 +2,22 @@
 
 ## 介绍  
 
-用`webgl`和`CPP`实现`games202`所提到的实时渲染的相关算法，避免`GIF`可能无法正常加载，此次文档使用`gIF`加`PNG`展示效果。  
+用`webgl`和`CPP`实现`games202`所提到的实时渲染的相关算法。为了节省存储空间，Github仓库未包含代码的原理解释等。  
 电脑GPU`（GPU AMD Radeon(TM) 530）`很拉，部分结果无法更好展示，抱歉了😞。
 
-## 1. Percentage Closer Soft Shadows  
+## 1. Percentage Closer Soft Shadows   
 
 ##### PCSS  
 
-![1](Assignment1/README_IMG/PCSS.gif)  
-![2](Assignment1/README_IMG/PCSS.png)  
-`PCSS`作业的基础要求，更多内容请参考[Assignment1\README](./Assignment1\README.md)。  
+![1](Assignment1/README_IMG/PCSS-50.gif)   
+`PCSS`作业的基础要求，更多内容请参考[我的博客-PCSS](https://howl144.github.io/2023/05/15/00015.%20Games202%20Hw1/)。  
 
-## 2. Precomputed Radiance Transfer  
+## 2. Precomputed Radiance Transfer   
 
 ##### PRT  
 
-![3](Assignment2/README_IMG/PRT.gif)  
-![4](Assignment2/README_IMG/PRT.png)  
-`PRT`作业的基础要求，更多内容请参考[Assignment2\README](./Assignment2\README.md)。  
+![3](Assignment2/README_IMG/PRT.gif)   
+`PRT`作业的基础要求，更多内容请参考[我的博客-PRT](https://howl144.github.io/2023/05/29/00016.%20Games202%20Hw2/)。  
 
 ## 3. Screen Space Reflection   
 
@@ -41,26 +39,24 @@
 
 `World Space Ray Marching SSR`则是作业的基础要求。  
 
-更多内容在[Assignment3/README](./Assignment3\README.md)。  
+更多内容在[我的博客-SSR](https://howl144.github.io/2023/06/10/00017.%20Games202%20Hw3/)。  
 
 ## 4. Kulla-Conty BRDF  
 
 ##### IBL and Split Sum Kulla-Conty BRDF    
 
 ![8](Assignment4/README_IMG/image-15.png)  
-`Split Sum`为作业的提高内容，`IBL`为个人扩展内容，更多内容请参考[Assignment4\README](./Assignment4\README.md)。  
+`Split Sum`为作业的提高内容，`IBL`为个人扩展内容，更多内容请参考[我的博客-KullaConty](https://howl144.github.io/2023/07/01/00018.%20Games202%20Hw4/)。  
 
 ## 5. Real-Time Ray Tracing Denoisers  
 
 ##### Spatiotemporal Variance-Guided Filtering Method  
 
 ![9](Assignment5/README_IMG/pinkroom-svgf.gif)  
-![10](Assignment5/README_IMG/pinkroom-svgf.png)   
 
 ##### Joint Bilateral Filter A-Trous Method  
 
 ![11](Assignment5/README_IMG/pinkroom-JBF-atrous.gif)  
-![12](Assignment5/README_IMG/pinkroom-JBF-atrous.png)  
-`SVGF`是参考`文刀秋二`大佬发表的[论文](https://zhuanlan.zhihu.com/p/28288053),论文表示**filter**的对象是`像素Irradiance的灰度值`，而且是**直接光**和**间接光**分开处理，最后进行`Modulate`时将`Emission`和`Albedo`加回去，这样就可以保留图像的高频信息了。但是作业没有给每帧的`Albedo`，无法得到`像素的Irradiance`，而且**直接光**和**间接光**也是混合在一起进行**filter**的，所以右边那幅图像看起来会比较糊，更多内容请参考[Assignment5/README](./Assignment5\README.md)。  
+`SVGF`是参考`文刀秋二`大佬发表的[论文](https://zhuanlan.zhihu.com/p/28288053),论文表示**filter**的对象是`像素Irradiance的灰度值`，而且是**直接光**和**间接光**分开处理，最后进行`Modulate`时将`Emission`和`Albedo`加回去，这样就可以保留图像的高频信息了。但是作业没有给每帧的`Albedo`，无法得到`像素的Irradiance`，而且**直接光**和**间接光**也是混合在一起进行**filter**的，所以右边那幅图像看起来会比较糊，更多内容请参考[我的博客-SVGF](https://howl144.github.io/2023/07/21/00019.%20Games202%20Hw5/)。  
 
 `JBF-atrous`则是作业的提高内容。

@@ -25,7 +25,6 @@ Vec2f Hammersley(uint32_t i, uint32_t N) { // 0-1
 
 Vec3f ImportanceSampleGGX(Vec2f Xi, Vec3f N, float roughness) {
     float a = roughness * roughness;
-    //Edit Start
     //TODO: in spherical space - Bonus 1
     float theta = atan(a * sqrt(Xi.x) / sqrt(1.0f - Xi.x));
     float phi = 2.0 * PI * Xi.y;
@@ -44,12 +43,10 @@ Vec3f ImportanceSampleGGX(Vec2f Xi, Vec3f N, float roughness) {
     //TODO: transform H to tangent space - Bonus 1
     Vec3f sampleVec = tangent * H.x + bitangent * H.y + N * H.z;
     return normalize(sampleVec);
-    //Edit End
 }
 
 float GeometrySchlickGGX(float NdotV, float roughness) {
     // TODO: To calculate Schlick G1 here - Bonus 1
-    //Edit Start
     float a = roughness;
     float k = (a * a) / 2.0f;
 
@@ -57,7 +54,6 @@ float GeometrySchlickGGX(float NdotV, float roughness) {
     float denom = NdotV * (1.0f - k) + k;
 
     return nom / denom;
-    //Edit End
 }
 
 float GeometrySmith(float roughness, float NoV, float NoL) {

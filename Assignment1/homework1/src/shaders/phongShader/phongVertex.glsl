@@ -13,7 +13,6 @@ varying highp vec3 vNormal;
 varying highp vec4 vPositionFromLight;
 
 void main(void) {
-
   vFragPos = (uModelMatrix * vec4(aVertexPosition, 1.0)).xyz;
   vNormal = (uModelMatrix * vec4(aNormalPosition, 0.0)).xyz;
 

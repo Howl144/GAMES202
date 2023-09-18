@@ -141,7 +141,7 @@ namespace ProjEnv
                     Eigen::Array3f Le(images[i][index + 0], images[i][index + 1],
                                       images[i][index + 2]);
 
-                    // Edit Start
+                    
                     auto delta_w = CalcArea(x, y, width, height);
 
                     for (int l = 0; l <= SHOrder; l++) {
@@ -152,7 +152,6 @@ namespace ProjEnv
                             SHCoeffiecents[sh::GetIndex(l, m)] += Le * basic_sh_proj * delta_w;
                         }
                     }
-                    // Edit End
                 }
             }
         }
@@ -296,9 +295,8 @@ public:
             auto shFunc = [&](double phi, double theta) -> double {
                 Eigen::Array3d d = sh::ToVector(phi, theta);
                 const auto wi = Vector3f(d.x(), d.y(), d.z());
-                // Edit Start
+                
                 double H = wi.normalized().dot(n.normalized());
-                // Edit End
                 if (m_Type == Type::Unshadowed)
                 {
                     // TODO: here you need to calculate unshadowed transport term of a given direction
@@ -318,9 +316,8 @@ public:
             auto shCoeff = sh::ProjectFunction(SHOrder, shFunc, m_SampleCount);
             for (int j = 0; j < shCoeff->size(); j++)
             {
-                // Edit Start
+                
                 m_TransportSHCoeffs.col(i).coeffRef(j) = (*shCoeff)[j];
-                // Edit End
             }
         }
         if (m_Type == Type::Interreflection)

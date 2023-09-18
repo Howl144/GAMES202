@@ -3,9 +3,9 @@ class PointLight {
      * Creates an instance of PointLight.
      */
     constructor(lightIntensity, lightColor, lightPos, focalPoint, lightUp, hasShadowMap, gl) {
-        //Edit Start 添加旋转参数
+        // 添加旋转参数
         this.mesh = Mesh.cube(setTransform(0, 0, 0, 0, 0, 0, 2.0, 2.0, 2.0));
-        //Edit End
+        
         this.mat = new EmissiveMaterial(lightIntensity, lightColor);
         this.lightPos = lightPos;
         this.focalPoint = focalPoint;
@@ -21,16 +21,15 @@ class PointLight {
         }
     }
 
-        //Edit Start 添加旋转参数
+        // 添加旋转参数
         CalcLightMVP(translate, rotate, scale) {
-        //Edit End
+        
             let modelMatrix = mat4.create();
             let lightMVP = mat4.create();
             let viewMatrix = mat4.create();
             let projectionMatrix = mat4.create();
             let fovy = 90;
             let aspect = 1;
-            //Edit Start
             // Model transform
             mat4.translate(modelMatrix, modelMatrix, translate)
             mat4.rotateX(modelMatrix, modelMatrix, rotate[0])
@@ -45,7 +44,7 @@ class PointLight {
             // Projection transform     
             mat4.perspective(projectionMatrix, fovy * Math.PI / 180, aspect, this.lightNearPlane, this.lightFarPlane);
     
-            //Edit End
+            
             //matrix multiplication is applied from right to left,
             //the order of transformations is opposite to the order in which they are written in code.
             //which means that the last transformation specified in code is actually applied first to the vertex。

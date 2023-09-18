@@ -1,0 +1,9 @@
+{
+    "cmake.sourceDirectory": "E:/vscode/games202/Assignment2/prt",
+    "cmake.debugConfig": {
+        "args": [
+            "E:/vscode/games202/Assignment2/prt/scenes/prt.xml"
+        ]
+    },
+    "liveServer.settings.port": 5501,
+}

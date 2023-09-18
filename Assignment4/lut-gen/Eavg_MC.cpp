@@ -64,9 +64,7 @@ Vec3f getEmu(int x, int y, unsigned char *data) {
 }
 
 Vec3f IntegrateEmu(float NdotV, Vec3f Ei) {
-    // Edit Start
     return Ei * NdotV * 2.0f;
-    // Edit End
 }
 
 

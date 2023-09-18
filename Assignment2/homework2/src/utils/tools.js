@@ -131,10 +131,8 @@ function mat4Matrix2mathMatrix(rotationMatrix){
 		}
 		mathMatrix.push(r);
 	}
-	// Edit Start
 	//return math.matrix(mathMatrix)
 	return math.transpose(mathMatrix)
-	// Edit End
 }
 
 function getMat3ValueFromRGB(precomputeL){

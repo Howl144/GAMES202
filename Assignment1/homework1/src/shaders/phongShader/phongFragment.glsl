@@ -20,13 +20,12 @@ varying highp vec3 vNormal;
 #define NUM_SAMPLES 32
 vec2 staticPoissonDisk[64];
 
-//Edit Start
-#define SHADOW_MAP_SIZE 2048.
-#define FILTER_RADIUS 10.
-#define TEXEL_SIZE 1.0 / SHADOW_MAP_SIZE
-//Edit End
 
-#define EPS 1e-6
+#define SHADOW_MAP_SIZE 2048.
+#define TEXEL_SIZE 1.0 / SHADOW_MAP_SIZE
+
+
+#define EPS 1e-5
 #define PI 3.141592653589793
 #define PI2 6.283185307179586
 
@@ -117,22 +116,20 @@ float unpack(vec4 rgbaDepth) {
   const vec4 bitShift = vec4(1.0, 1.0/256.0, 1.0/(256.0*256.0), 1.0/(256.0*256.0*256.0));
   return dot(rgbaDepth, bitShift);
 }
-//Edit Start
-//自适应Shadow Bias算法 https://zhuanlan.zhihu.com/p/370951892
-float getShadowBias(float c, float filterRadiusUV){
+
+float getShadowBias(float biasC){
   vec3 normal = normalize(vNormal);
   vec3 lightDir = normalize(uLightPos - vFragPos);
-  float fragSize = (1. + ceil(filterRadiusUV)) * (uLightFarPlane / SHADOW_MAP_SIZE / 2.);
-  return max(fragSize, fragSize * (1.0 - dot(normal, lightDir))) * c;
+  return max(biasC * (1.0 - dot(normal, lightDir)), 1e-5);
 }
-//Edit End
 
-//Edit Start
-float useShadowMap(sampler2D shadowMap, vec4 shadowCoord, float biasC, float filterRadiusUV){
+
+
+float useShadowMap(sampler2D shadowMap, vec4 shadowCoord, float biasC){
   float depth = unpack(texture2D(shadowMap, shadowCoord.xy));
   float cur_depth = shadowCoord.z;
-  float bias = getShadowBias(biasC, filterRadiusUV);
-  if(cur_depth - bias > depth){
+  float bias = getShadowBias(biasC);
+  if(cur_depth > depth + bias){
     //不可见
     return 0.0;
   }
@@ -141,34 +138,34 @@ float useShadowMap(sampler2D shadowMap, vec4 shadowCoord, float biasC, float fil
     return 1.0;
   }
 }
-//Edit End
 
-//Edit Start
-float PCF(sampler2D shadowMap, vec4 coords, float biasC, float filterRadiusUV) {
+
+
+float PCF(sampler2D shadowMap, vec4 coords, float biasC, float filterRadius) {
   float visibility = 0.0;
   for(int i = 0; i < NUM_SAMPLES; i++){
     vec2 poissonDisk = staticPoissonDisk[i];
     // 应用随机旋转
-    vec2 rotatedPoissonDisk = randomRotation(coords.xy, poissonDisk) * filterRadiusUV; 
-    float shadowDepth = useShadowMap(shadowMap, coords + vec4(rotatedPoissonDisk, 0., 0.) , biasC, filterRadiusUV);
-    if(coords.z > shadowDepth){
-      //算的不可见的
-      visibility++;
-    }
+    vec2 rotatedPoissonDisk = randomRotation(coords.xy, poissonDisk) * filterRadius * TEXEL_SIZE; 
+    visibility += useShadowMap(shadowMap, coords + vec4(rotatedPoissonDisk, 0., 0.) , biasC);
   }
-  //1 - 可见
-  return 1.0 - visibility / float(NUM_SAMPLES);
+  return visibility / float(NUM_SAMPLES);
 }
-//Edit End
 
-//Edit Start
+
 float findBlocker(sampler2D shadowMap, vec4 coords, float zReceiver, float calibratedLightSize) {
   int blockerNum = 0;
-  float blockDepth = 0.;
-  // float shadowNearPlane = unpack(texture2D(shadowMap, coords.xy));
-  //本来是用shadowNearPlane来计算searchRadius，但是这样会导致阴影边缘有锯齿，因为边缘处的shadowNearPlane和zReceiver的值几乎相同
-  //这里就跟正交投影的形式一样直接用投影矩阵的近平面来计算。
-  float searchRadius = calibratedLightSize * (zReceiver - 0.01) / zReceiver;
+  float avgBlockDepth = 0.;
+  float blockerDepth = unpack(texture2D(shadowMap, coords.xy));
+  float searchRadius = 0.0;
+  //blockerDepth和zReceiver大致相等时，固定search范围
+  if(abs(blockerDepth - zReceiver) < 3.0 * TEXEL_SIZE){
+    searchRadius = calibratedLightSize;
+    // return searchRadius = 1.0;//debug
+  }else{
+    searchRadius = calibratedLightSize * (zReceiver - blockerDepth) / zReceiver;
+    // return searchRadius = 0.0;//debug
+  }
 
   for(int i = 0; i < NUM_SAMPLES; i++){
     vec2 poissonDisk = staticPoissonDisk[i];
@@ -176,7 +173,7 @@ float findBlocker(sampler2D shadowMap, vec4 coords, float zReceiver, float calib
     float shadowDepth = unpack(texture2D(shadowMap, coords.xy + rotatedPoissonDisk * searchRadius * TEXEL_SIZE));
     if(zReceiver > shadowDepth){
       blockerNum++;
-      blockDepth += shadowDepth;
+      avgBlockDepth += shadowDepth;
     }
   }
 
@@ -184,46 +181,47 @@ float findBlocker(sampler2D shadowMap, vec4 coords, float zReceiver, float calib
     return -1.0;
   else
     //avgBlockerDepth，是有blocker的地方才算它的depth，所有这里不是除以NUM_SAMPLES
-    return blockDepth / float(blockerNum);
+    return avgBlockDepth / float(blockerNum);
 }
-//Edit End
 
-//Edit Start
+
 float PCSS(sampler2D shadowMap, vec4 coords, float biasC,float calibratedLightSize){
   float zReceiver = coords.z;
 
   // STEP 1: avgblocker depth 
   float avgBlockerDepth = findBlocker(shadowMap, coords, zReceiver,calibratedLightSize);
 
-  if(avgBlockerDepth < -EPS)
+  if(avgBlockerDepth == -1.0)
     return 1.0;
 
   // STEP 2: penumbra size
   float penumbra = (zReceiver - avgBlockerDepth) * calibratedLightSize / avgBlockerDepth;
-  float filterRadiusUV = penumbra ;
+  float filterRadius = penumbra;
 
   // STEP 3: filtering
-  return PCF(shadowMap, coords, biasC, filterRadiusUV * TEXEL_SIZE);
+  return PCF(shadowMap, coords, biasC, filterRadius);
 }
-//Edit End
+
 
 vec3 blinnPhong() {
+  
   vec3 color = texture2D(uSampler, vTextureCoord).rgb;
   color = pow(color, vec3(2.2));
 
-  vec3 ambient = 0.05 * color;
+  float distance = length(uLightPos - vFragPos);
+  vec3 attenuation = uLightIntensity / (1.0 + 0.045 * distance + 0.0075 * (distance * distance)); 
+
+  vec3 ambient = 0.01 * color;
 
   vec3 lightDir = normalize(uLightPos);
   vec3 normal = normalize(vNormal);
   float diff = max(dot(lightDir, normal), 0.0);
-  vec3 light_atten_coff =
-      uLightIntensity / pow(length(uLightPos - vFragPos), 2.0);
-  vec3 diffuse = diff * light_atten_coff * color;
+  vec3 diffuse = diff * color * attenuation;
 
   vec3 viewDir = normalize(uCameraPos - vFragPos);
   vec3 halfDir = normalize((lightDir + viewDir));
   float spec = pow(max(dot(halfDir, normal), 0.0), 32.0);
-  vec3 specular = uKs * light_atten_coff * spec;
+  vec3 specular = uKs  * spec * attenuation;
 
   vec3 radiance = (ambient + diffuse + specular);
   vec3 phongColor = pow(radiance, vec3(1.0 / 2.2));
@@ -240,51 +238,37 @@ float LinearizeDepth(float depth)
 
 void main(void) {
   initStaticPoissonDisk();
-  //Edit Start
-  //vPositionFromLight为光源空间下投影的裁剪坐标，除以w结果为NDC坐标
+  //vPositionFromLight为光源空间下的裁剪空间坐标，除以w结果为NDC坐标
   vec3 shadowCoord = vPositionFromLight.xyz / vPositionFromLight.w;
   //把[-1,1]的NDC坐标转换为[0,1]的坐标
   shadowCoord.xyz = (shadowCoord.xyz + 1.0) / 2.0;
   //手动计算深度值
   float fragDepth = length(vFragPos-uLightPos) / uLightFarPlane;
 
-  float visibility = 1.0;
+  float visibility = 0.0;
 
-  // 无PCF时的Shadow Bias
-  float nonePCFBiasC = 0.03;
-  // 有PCF时的Shadow Bias
-  float pcfBiasC = 0.03;
-  // PCF的采样范围，因为是在Shadow Map上采样，需要除以Shadow Map大小，得到uv坐标上的范围
-  float calibratedLightSize = clamp(uLightWorldSize, 10.0, 50.0);
-
-  //没有使用cubemap，将就限制一下范围
+  // Shadow Bias
+  float biasC = 0.002;
+  // Light Size
+  float calibratedLightSize = 100.0;//clamp(uLightWorldSize, 10.0, 100.0)
+  //点光源没有使用cubemap，将就限制一下范围
   if(shadowCoord.x < 0.0 || shadowCoord.x > 1.0  || shadowCoord.y < 0.0 || shadowCoord.y > 1.0 || shadowCoord.z < 0.0 || shadowCoord.z > 1.0){
     //超出平截头体范围的值直接返回1.0
     visibility = 1.0;
   }
   else{
-    // 硬阴影无PCF，最后参数传0
-    // visibility = useShadowMap(uShadowMap, vec4(shadowCoord.xy,fragDepth, 1.0), nonePCFBiasC, 0.0);
-    // visibility = PCF(uShadowMap, vec4(shadowCoord.xy,fragDepth, 1.0), pcfBiasC, calibratedLightSize * TEXEL_SIZE);
-    visibility = PCSS(uShadowMap, vec4(shadowCoord.xy,fragDepth, 1.0), pcfBiasC,calibratedLightSize);
+    // 硬阴影
+    // visibility = useShadowMap(uShadowMap, vec4(shadowCoord.xy,fragDepth, 1.0), biasC);
+    // PCF
+    // visibility = PCF(uShadowMap, vec4(shadowCoord.xy,fragDepth, 1.0), biasC, calibratedLightSize);
+    // PCSS
+    visibility = PCSS(uShadowMap, vec4(shadowCoord.xy,fragDepth, 1.0), biasC,calibratedLightSize);
   }
 
   vec3 phongColor = blinnPhong();
 
-  
-
   gl_FragColor = vec4(phongColor * visibility, 1.0);
 
-
-  // //debug1
-  // float debugDepth1 = length(vFragPos-uLightPos) / uLightFarPlane;
-  // gl_FragColor = vec4(vec3(debugDepth1), 1.0);
-  // //debug2
-  // float debugDepth2 = unpack(texture2D(uShadowMap, shadowCoord.xy));
-  // gl_FragColor = vec4(vec3(debugDepth2), 1.0);
-  // // debug3 
-  // gl_FragColor = vec4(vec3(shadowCoord.z), 1.0);
-  // // debug4 
-  // gl_FragColor = vec4(vec3(findBlocker(uShadowMap, shadowCoord.xy, fragDepth,100.0)),1.0);
-  //Edit End
+  // float debug1 = findBlocker(uShadowMap, vec4(shadowCoord.xy,fragDepth, 1.0), fragDepth, calibratedLightSize);
+  // gl_FragColor = vec4(vec3(debug1),1.0);
 }
