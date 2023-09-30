@@ -1,0 +1,6 @@
+file(GLOB_RECURSE srcs CONFIGURE_DEPENDS *.cpp *.h)
+set(name Z-buffer)
+add_executable(${name} ${srcs})
+target_link_libraries(${name} ${OpenCV_LIBS})
+target_include_directories(${name} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_options(${name} PUBLIC -Wall)
